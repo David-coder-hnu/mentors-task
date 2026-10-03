@@ -1,7 +1,8 @@
 # TODOS
 
-推迟项清单。来源：`IPv6_Agent_探测_设计方案.md` 的 `## NOT in scope` 表与
-`/plan-eng-review`（2026-10-03）的 TODOS 提案，四条均由用户逐条确认为「加进 TODOS.md」。
+推迟项清单。来源：`IPv6_Agent_探测_设计方案.md` 的 `## NOT in scope` 表、
+`/plan-eng-review`（2026-10-03）与 `/plan-ceo-review`（2026-10-03）的 TODOS 提案，
+各条均由用户逐条确认为「加进 TODOS.md」。
 
 优先级定义见 gstack `review/TODOS-format.md`：P0 阻塞 / P1 关键 / P2 重要 / P3 可选 / P4 某天。
 
@@ -41,20 +42,6 @@
 
 ## 仓库
 
-### 把版权材料与原型代码物理隔离，为将来开源做准备
-
-**What:** 把 IEEE 论文原文与全文译读从原型代码里剥离——拆成两个仓库，或用 `docs/restricted/` 目录 + 导出脚本。
-
-**Why:** 仓库同时装着版权材料（`6Seeks_...pdf`、`6Seeks_中文全文.md`、`IPv6_Agent_Probing_Research_Report.*`）和原型代码 `src/`。`CLAUDE.md` 已把「将来开源必须先剥离」写成硬约束，但**没有任何机制保证这件事会发生**。现在 `src/` 还是空的，拆分成本最低；等代码长起来再拆要处理历史、引用路径与 CI。
-
-**Context:** 仓库**已推送到 GitHub（private）**。两条备选：(a) 拆成 `mentors-task-notes`（版权材料，永久 private）+ `mentors-task-proto`（代码，可开源）；(b) 单仓库 + `docs/restricted/` + 一个导出脚本，导出时排除该目录。**关键是开源可能永远不发生——所以这条可以一直不做，但一旦要做，越早越便宜。**
-
-**Effort:** M
-**Priority:** P3
-**Depends on:** None
-
----
-
 ### fork 路线的回退预案
 
 **What:** 写下 Stage 2 从 `RouterShim` 回退到「fork Punching Bag 包路径」的触发条件、代价与前置要求。
@@ -69,3 +56,49 @@
 **Effort:** S（仅写预案；执行是 XL）
 **Priority:** P4
 **Depends on:** None
+
+---
+
+## 工具链
+
+来源：`/plan-ceo-review`（2026-10-03）的 Outside Voice 与 JSONL 产物两步。
+
+### 安装 `jq`
+
+**What:** 在开发机装上 `jq`（Windows：`winget install jqlang.jq` 或 `scoop install jq`）。
+
+**Why:** gstack 的评审技能用 `jq -nc` 逐行序列化任务清单（JSONL），供 `/autoplan` 跨轮次聚合。**规格明令不得手写 JSONL**——手拼 JSON 遇到引号、换行、反斜杠就会产出坏文件，而坏文件在聚合端看起来像合法数据。本机没有 `jq`，所以 `/plan-ceo-review`（2026-10-03）的 21 条 Implementation Tasks **没有产出 JSONL**，那次评审不进 autoplan 聚合。
+
+**Context:** 装好后可重跑那次评审的 JSONL 产出步骤补上。**不影响任何实验结果**，只是少一份跨轮次数据。同类工具缺口见下一条。
+
+**Effort:** S
+**Priority:** P3
+**Depends on:** None
+
+---
+
+### 安装 Codex CLI，让评审有跨模型覆盖
+
+**What:** `npm install -g @openai/codex`，使 `/plan-ceo-review` 与 `/plan-eng-review` 的 Outside Voice 步骤走真正的跨模型评审，而不是回退到 Claude 子代理。
+
+**Why:** Outside Voice 的设计意图是**用另一个厂商的模型独立审一遍**——不同模型的盲区不同，这是抓出「自己看不见的错误」最有效的手段。`/plan-ceo-review`（2026-10-03）返回 `CODEX_MODE: not_installed`，因此回退到 Claude 子代理：**16 条发现与我自己的视角同源**。事后逐条核实发现其中 **3 条断言站不住**（最典型的是「B5 按构造恰好正确」——它默认了四档响应率的数值，而那恰是未决的 0.2(b) 问题）。**同源评审更容易放过这一类。**
+
+**Context:** 本次回退是规范允许的，不是错误；记下来是为了避免下次误以为「已经跨模型验证过了」。**装它的最佳时机是第一次冒烟表读数之后**——那时做评审才又有实测数据可依（见下）。**注意与「停止评审」条件的关系**：`/plan-ceo-review` 设的条件是「门 0 通过之后、首次冒烟表之前不再开新评审轮」，所以在那之前装它是没有用的。
+
+**Effort:** S
+**Priority:** P3
+**Depends on:** None
+
+---
+
+## Completed
+
+### 把版权材料与原型代码物理隔离，为将来开源做准备
+
+**Completed:** /plan-ceo-review 2026-10-03（未发版，记 commit `b95aac3`）
+
+**结论：从 TODOS 升级为 Stage 0 的交付物**，不再推迟。原条目内容（拆仓库或 `docs/restricted/` + 导出脚本）原样保留为实现方向，见 `IPv6_Agent_探测_设计方案.md` 与 CEO plan 的 Section 10A。
+
+**为什么提前做：** `CLAUDE.md` 已把「将来开源必须先剥离」写成硬约束，而**没有任何机制保证它会发生**。本条自己记着「**现在 `src/` 还是空的，拆分成本最低**」——一条自己论证「越早越便宜」的推迟项，与「推迟」这个动作本身矛盾。它被推迟的理由（「开源可能永远不发生」）只否定了**紧迫性**，没有否定**成本曲线**。
+
+**落地形式：** 不是文档，而是**可运行的检查**——`docs/restricted/` 收版权材料 + 一个导出脚本按排除清单产出 `src/` 的干净副本，脚本内**断言副本不含任何版权材料路径**。这条断言是门 0 的条件 9（9 条条件之一），**不过就不开门 1**。

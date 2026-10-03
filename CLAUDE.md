@@ -12,8 +12,9 @@
 | `IPv6_Agent_Probing_Research_Report.md` | 上述报告的 markdown 转写（原文中文，逐页对照页面图像核对） |
 | `6Seeks_A_Global_IPv6_Network_Periphery_Scanning_System.pdf` | IEEE ToN 2025 原文，关键基线论文 |
 | `6Seeks_中文全文.md` | 6Seeks 全文中文译读（含表 I–VI、图 1–16 图说、关键数字速查） |
-| `IPv6_Agent_探测_设计方案.md` | 设计方案（2026-10-03，`/office-hours` 产出，经 3 轮对抗式评审 + `/plan-eng-review` 四段评审 + Outside Voice，**已修订到 v4**）。核心决定：贡献是靶场 + 可回放评分器，Agent 是靶场上的被测对象。**v2**：发现 Punching Bag（IMC 2026）本身就是这类靶场，贡献拆两半。**v4**：P1 由「LLM vs RL」改写为「**开放 vs 封闭动作空间**」；Stage 2 由 fork 包路径改为 **Response 层 shim**；主终点由 `info_gain` 改为**可数量**；Stage 1 降为 Stage 2 的 harness 前置。含 8 行基线表（B0–B5、A1–A2）、Stage 0–3 拆分、8 条 `Reviewer Concerns`、T1–T16 任务清单 |
-| `TODOS.md` | 推迟项清单（2026-10-03 建立，4 条：导师答复补录、其余 5 个 TGA 基线、版权材料隔离、fork 回退预案） |
+| `IPv6_Agent_探测_设计方案.md` | **唯一权威的设计文档（活文档，永远以它为准）**。2026-10-03 由 `/office-hours` 产出，经 3 轮对抗式评审 + `/plan-eng-review` 四段评审 + `/plan-ceo-review`（含 Outside Voice），**现为 v5**。核心决定：贡献是靶场 + 可回放评分器，Agent 是靶场上的被测对象。**v2**：发现 Punching Bag（IMC 2026）本身就是这类靶场，贡献拆两半。**v4**：P1 由「LLM vs RL」改写为「**开放 vs 封闭动作空间**」；Stage 2 由 fork 包路径改为 **Response 层 shim**；主终点由 `info_gain` 改为**可数量**；Stage 1 降为 Stage 2 的 harness 前置。**v5**：把 CEO review 的 22 条写回逐条落地（Stage 1 降为冒烟表、30 次比较的 Holm–Bonferroni、两个 co-primary 端点的判决规则、P1 的 2×2 杀死矩阵、A3 声明失效、缓存键加 config 哈希）。含 8 行基线表（B0–B5、A1–A3）、Stage 0–3 拆分、8 条 `Reviewer Concerns`、T1–T16 任务清单 |
+| `docs/plans/2026-10-03-ceo-plan.md` | `/plan-ceo-review` 的快照（`status: PROMOTED`）。**不是活文档**——所有判断已落进上面的设计文档。**它的价值在"当时为什么这么改"**：被否决的备选、被撤销的扩张、Outside Voice 16 条里没通过核实的 3 条。**与设计文档冲突时以后者为准**（文件开头有完整说明） |
+| `TODOS.md` | 推迟项清单（2026-10-03 建立）。**当前 5 条**：导师答复补录（P1）、其余 5 个 TGA 基线（P3）、fork 回退预案（P4）、安装 `jq`（P3）、安装 Codex CLI（P3）。原「版权材料隔离」已**关闭**——升级为 Stage 0 交付物（门 0 条件 9） |
 
 ## 代码（原型）
 
@@ -24,7 +25,7 @@
 
 ## 约束
 
-- **仓库保持 private**：内含 IEEE 版权论文原文与全文翻译，转 public 会构成再分发版权内容。**若将来要开源原型代码，必须先把版权论文 PDF 与全文译读从待公开的内容里剥离**（拆仓库或调整 `.gitignore`），不能整仓库转 public。
+- **仓库保持 private**：内含 IEEE 版权论文原文与全文翻译，转 public 会构成再分发版权内容。**若将来要开源原型代码，必须先把版权论文 PDF 与全文译读从待公开的内容里剥离**（拆仓库或调整 `.gitignore`），不能整仓库转 public。**这条规则已有执行机制，不靠人记忆**：版权材料收进 `docs/restricted/`，由导出脚本按排除清单产出干净副本并**断言副本不含该目录下任何路径**——见设计方案 `## Constraints` 段（Stage 0 交付物，门 0 条件 9）。
 - 6Seeks 论文**不公开**其发现的 1.28 亿个 IPv6 外围地址，只公开源码与活跃 /48 前缀。要做对比实验需先确认数据可得性，或自行复现。
 - **第三方论文不进仓库**：新下载的论文 PDF 放临时目录，不进版本库。引用第三方数据/代码时用「链接 + commit hash」的方式，不 vendor 原文。
 - 复用或改写第三方工具时，登记其许可证与上游 commit：Punching Bag 为 **CC-BY 4.0**（署名即可，允许改），上游 `github.com/tumi8/punching-bag`。
