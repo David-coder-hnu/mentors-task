@@ -1,0 +1,2 @@
+# shell 脚本必须保持 LF：CRLF 会让 hook 的 shebang 失效
+*.sh text eol=lf
