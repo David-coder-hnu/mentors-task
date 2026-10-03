@@ -6,9 +6,11 @@
 
 | 文件 | 说明 |
 |---|---|
-| `IPv6_Agent_Probing_Research_Report.pdf` | 自写调研报告（2026-09），含 6Gen→TNet 的相关工作演进与建议架构 |
+| `IPv6_Agent_Probing_Research_Report.pdf` | 自己写的调研报告（2026-09），含 6Gen→TNet 的相关工作演进与建议架构 |
+| `IPv6_Agent_Probing_Research_Report.md` | 上述报告的 markdown 转写（原文中文，逐页对照页面图像核对） |
 | `6Seeks_A_Global_IPv6_Network_Periphery_Scanning_System.pdf` | IEEE ToN 2025 原文，关键基线论文 |
 | `6Seeks_中文全文.md` | 6Seeks 全文中文译读（含表 I–VI、图 1–16 图说、关键数字速查） |
+| `IPv6_Agent_探测_设计方案.md` | 设计方案（2026-10-03，`/office-hours` 产出，经 3 轮对抗式评审）。核心决定：贡献是 ground-truth oracle + 可回放评分器，Agent 是靶场上的被测对象；LLM vs RL 的差异定为「动作空间开放 vs 封闭」且作为**待证伪假说**。含 7 行基线对比表设计、Phase 1/2 拆分、以及 5 条 `Reviewer Concerns` |
 
 ## 约束
 
