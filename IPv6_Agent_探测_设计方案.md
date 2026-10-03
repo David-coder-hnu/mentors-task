@@ -27,6 +27,34 @@ v1 定稿后，`/plan-eng-review` 的 Step 0 做了一次靶场搜索，发现 *
 
 **这次修订不改的东西**：P1、P2、P4 的三个后端有效性边界、指标的形式定义（只是把「实体」泛化）、B5 公平性协议、以及对 Agent 叙事的诚实态度（Reviewer Concern #5）。
 
+---
+
+## 修订记录 v4（2026-10-03）：Outside Voice 与七条终局决定
+
+`/plan-eng-review` 的四段评审完成后，按 skill 要求跑了 **Outside Voice**（Codex 未安装，改用独立 Claude subagent 冷读全文）。它提了 18 条，其中 **5 条是我四段评审的直接失误**，不是判断分歧：
+
+| Outside voice | 性质 | 我的评审 |
+|---|---|---|
+| **#6 预言机泄漏**：`probe()` 与 `ground_truth()` 挂在同一个交给策略的对象上；B2 直接吃预言机种子；**6Sense 被喂了 aliased 前缀列表——那就是答案** | 具体缺陷 | 只修了 6Sense 的**架构**（独立轨道），完全没看见**信息不对称** |
+| **#7 在线目标未定义**：`info_gain` 需要 `E`（预言机），Agent 观察不到，所以它优化的是某个未指定的代理量 | 具体缺陷 | 完全漏掉 |
+| **#11 并发 × 缓存互斥**：并发下回包到达顺序不定 → `state` 不定 → `hash(state)` 不定 → 缓存永不命中 → 不可复现 | 具体缺陷 | Issue 5 与 Issue 4 是分开评审的，**没人把两条放一起看** |
+| **#3 Stage 1 结构上无法检验 P1**：Punching Bag 只回 Echo，策略唯一能决定的是「下一个探哪个前缀」——正是 P1 指控 RL 的那种封闭动作空间 | 定位问题 | 只说了「P1 只能在 ReplayNet 上回答」，没推出 Stage 1 做不了这个实验 |
+| **#2 无知识消融**：LLM 预训练里就懂 IPv6，B4 是白板 bandit。赢了也归因不了 | 实验效度 | 完全漏掉 |
+
+**七条决定（全部由用户逐条裁决，outside voice 未获批准前一律不进正文）：**
+
+| # | 决定 | 采纳项 | 直接后果 |
+|---|---|---|---|
+| **D6** | P1 的表述与 Stage 1 的定位 | **A：把话说小 + 加对照** | P1 从「LLM vs RL」改写为「**允许构造新 primitive vs 不允许**」；加一组知识消融/弱模型对照；明写 Stage 1 只测封闭动作空间这一半 |
+| **D7** | 预言机泄漏协议 | **A：隔离 + 定种子/6Sense 规则 + 定在线目标** | `probe`/`sample` 与 `ground_truth` 分离到不同对象；种子二选一写死；6Sense 标注为**预言机辅助上界**；定义 Agent 可优化的在线代理量 |
+| **D8** | 统计判据与主终点 | **A：配对检验 + 可数主终点** | 改用**同 seed 配对检验**；主终点改为**可数量**（aliased 预算占比 / 正确识别数）；`info_gain` 降为次要；补多重性校正与分布报告 |
+| **D9** | 并发 × 可复现性，与 Stage 2 路径 | **A：状态规范化 + Response shim + 实测 Docker** | 状态规范化写进规格并清掉残留旧键；**Stage 2 改为 Response 层 shim，不再 fork 包路径**；T1 验证升级；固定 LLM 身份 |
+| **D10** | Stage 1 配置 | **A：现在写死 + 加平凡基线** | 配置规格（前缀数 / aliased 占比 / 响应率分布）写进 plan；新增 **B0「全探一遍」**作为退化警报 |
+| **D11** | Stage 1 的定位 | **B：重心移到 Stage 2**（非推荐项） | Stage 1 降为**跳板**；资源投向 Stage 2——导师真正的命题所在 |
+| **D12** | ReplayNet 的真值 | **A：写清真值契约 + 标出上限** | 不再冒充「真实路由器集合」；外部效度的 claim 收窄到实际能支持的强度 |
+
+> **D11 与 D6 的组合效果必须说清**：D6 把 P1 缩小到「可测的边界」，D11 把资源移到 Stage 2——**两者是同一判断的两面**。P1 完整检验只能在开放动作空间的场地上做，而那个场地就是 Stage 2。Stage 1 因此**不再是「完整交付物」，而是 Stage 2 的 harness 前置**：它的产出是 `NetworkUnderTest` 适配器、评分器、基线套件与决策缓存机制，这些 Stage 2 原样复用。这同时回应了 outside voice #15（范围漂移）——不再假装 Stage 1 交付了导师的多目标愿景。
+
 ## Problem Statement
 
 原始问题（用户原话）：
@@ -76,23 +104,33 @@ v1 定稿后，`/plan-eng-review` 的 Step 0 做了一次靶场搜索，发现 *
 
 ## Premises
 
-### P1 — LLM 主导决策与 RL 的区别，在于**动作空间是开放的还是封闭的**（用户改写，已采纳）
+### P1 — 区别在于**动作空间是开放的还是封闭的**（v4 重写：不再写成「LLM vs RL」）
 
 我的原始表述是"Agent 新增了一个维度：Method"。用户直接否掉了：
 
 > **但怎么说呢，我认为 LLM 主导决策和 RL 还是有很大区别的。**
 
-这个反驳是对的，我原来的说法太弱——"多一个维度"恰恰是 RL 的做法（扩动作空间、重训）。改写后的命题：
+这个反驳是对的，我原来的说法太弱——"多一个维度"恰恰是 RL 的做法（扩动作空间、重训）。
 
-| | RL 决策体 | LLM 决策体 |
+**但 outside voice #1 指出：把这条写成「LLM vs RL」是打错靶子了。** 「能自己发明新工具」靠的不是"它是 LLM"，而是"**它被允许写代码/描述新原语**"。一个跑在生成式动作空间上的 RL 策略同样开放；而本设计里指定的"RL 对照" B4 恰恰是个**在线 bandit**——加一条臂不会让历史策略作废，"改动作空间 → 重训"对它根本不成立。本领域真正的 RL（6Hit、6SENSE）也都是在线 bandit 式（导师报告 §2）。
+
+**D6 采纳后的表述（v4 定稿）**：
+
+| | **封闭动作空间**决策体 | **开放动作空间**决策体 |
 |---|---|---|
-| 动作空间 | **封闭**：预先指定并离散化 | **开放**：可描述即可执行 |
-| 新增探测原语 | 改动作空间 → 重训 → 历史策略作废 | 写进工具描述 → 立即可用 |
-| 跨目标迁移 | 换目标 = 换 reward = 重训 | 目标写进 prompt 条件 |
+| 动作空间 | 预先指定并离散化 | **可描述即可执行**（能构造新 primitive） |
+| 新增探测原语 | 需改代码 + （若为学习型）重训 | 描述出来 → 立即可用 |
+| 跨目标迁移 | 换目标需要重新设计 | 目标写进条件 |
 | 决策理由 | 无（数值策略） | 可读 |
 | 参数微调 | **强项** | 弱项，不该用 LLM 做 |
 
-**推论**：这把 RL **降级为 Agent 工具箱里的一个组件**，不是"被取代"。RL 继续做它擅长的（region/budget 分配、bandit 式在线反馈），LLM 做 RL 做不了的（选哪个工具、要不要换目标、这个前缀像不像 aliased）。分层，不是替代。
+**关键改动：这一列不再叫「RL」，叫「封闭动作空间」。** LLM 是本设计选来实例化"开放"的**一个**手段，不是命题本身。这样写的直接好处是——**若最终用 RL 实现了开放动作空间，P1 不被推翻**；反之若 LLM 被限制在固定工具池里，它也不满足 P1 的"开放"。
+
+**推论不变**：这把 RL **降级为 Agent 工具箱里的一个组件**，不是"被取代"。RL 继续做它擅长的（region/budget 分配、bandit 式在线反馈），开放动作空间那一层做 RL 做不了的（选哪个工具、要不要换目标、这个前缀像不像 aliased）。分层，不是替代。
+
+> **⚠️ outside voice #2 要求的对照（D6 采纳项，必做）**：LLM 预训练里本就懂 IPv6 编址 / aliasing / 前缀结构，而 B4 是白板 bandit。**若 A1/A2 赢了，赢的是"开放动作空间"还是"预训练先验"？** 现在无法区分。**因此 A 组必须加一个知识消融对照**：把 IPv6 领域知识从 prompt 里抹掉（或换一个明显更弱的模型），跑同一套实验。这是零成本的归因，不做则 P1 的结论不成立。
+>
+> **⚠️ outside voice #3（D6 采纳项）**：**Stage 1 的场地按构造是封闭的**——Punching Bag 只回 ICMPv6 Echo，策略唯一能做的决定是"下一个探哪个前缀"。**所以 Stage 1 只检验 P1 的"封闭"这一半（即：在封闭空间里，开放动作空间的优势应当消失——A1/A2 不应显著胜过 B4/B5）。P1 的完整检验只能在 Stage 2（有真正可构造的新原语）做。** 这一条以 D11 的"重心移到 Stage 2"为落点，二者是同一判断。
 
 ### P2 — 这个区别目前是**假说**，必须变成可测的量，否则不该写进主张
 
@@ -134,6 +172,23 @@ v1 定稿后，`/plan-eng-review` 的 Step 0 做了一次靶场搜索，发现 *
 | `ReplayNet` | 真实网络上的现象 | （这是唯一能产生外部有效性的后端） |
 
 **推论**：在 ReplayNet 跑通之前，任何结论的措辞必须是"在仿真拓扑下"或"在 netns 下"。**不得**出现"IPv6 网络中 Agent 优于 RL"这类表述。
+
+### ⚠️ ReplayNet 的真值契约（v4 / D12 采纳项 —— outside voice #4）
+
+**v3 一直把 ReplayNet 当作"P1 完整检验的唯一场所"和"外部效度的唯一来源"，但从未规定 `ground_truth()` 在 ReplayNet 上返回什么。** `GroundTruth.routers` = "真实存在的最后一跳路由器地址集合"——**这在真实互联网上不可获得**；而天然替代品（6Seeks 的 1.28 亿外围地址）论文不公开（见 Constraints）。**那个逃生舱按 v3 的写法并不存在。**
+
+v4 的诚实处理——**收窄，不冒充**：
+
+| ReplayNet 提供 | ReplayNet **不**提供 |
+|---|---|
+| 可验证的**响应序列**（真实抓包，含 ICMPv6 错误与 Echo 的完整类型分布） | 「真实存在的最后一跳路由器地址集合」——**拿不到，不再声称** |
+| **可回放的实验条件**（同一批目标、同一预算、可重复执行） | 任何形式的前缀级真值标签 |
+| 跨策略在**真实响应分布**下的相对表现 | 绝对意义上的"发现了多少真实实体" |
+
+**因此在 ReplayNet 上，主端点只能是相对量**（策略间配对比较），**不能是 `true_routers` 这类需要绝对真值的量**。相应地：
+
+- **P1 的完整检验不依赖 ReplayNet**（v4 改口）——它依赖的是**开放动作空间**，而那个场地由 Stage 2 的 Response shim 提供。ReplayNet 的作用是检验"Stage 2 的结论在真实响应分布下是否仍成立"，**是稳健性检验，不是真值来源**。
+- Open Question 1（数据可得性）的**重要性进一步下降**：拿不到 6Seeks 数据只影响 Stage 3 的规模，不影响任何真值。
 
 ---
 
@@ -212,14 +267,40 @@ Response = {
     "timeout":   bool,
 }
 
-# 真值：oracle 的全部输出，评分器只能读这个
+# 真值：oracle 的全部输出
 GroundTruth = {
     "routers":    set[str],            # 真实存在的最后一跳路由器地址集合
     "prefixes":   {str: PrefixTruth},  # 前缀 → {aliased: bool, n_routers: int}
     "topology":   {str: [str]},        # 路由器 → 邻居，用于拓扑类指标
-    "seed_map":   {str: [str]},        # 前缀 → 已知 seed 地址（供 seed-based 基线用）
+    "seed_map":   {str: [str]},        # 前缀 → 已知 seed 地址
 }
 ```
+
+### ⚠️ 能力隔离（v4 / D7 采纳项 —— outside voice #6）
+
+**上面两个结构绝不能挂在同一个交给策略的对象上。** v2 的 `NetworkUnderTest` 同时暴露 `probe()` 和 `ground_truth()`，而该对象直接交给被测策略——**会写代码的 A2 可以顺手把答案读出来**。这不是"约定不要调"能防住的。规格强制如下：
+
+```python
+# 策略只能看到这个
+class ProbeSurface:                    # ← 交给策略的唯一对象
+    def probe(self, dst, proto, hop_limit) -> Response
+    def sample(self, prefix, n) -> list[Response]
+    # 没有 ground_truth，没有 seed_map，没有任何真值字段
+
+# runner 侧持有，策略拿不到
+class Oracle:                          # ← 只给 score() 和 runner 用
+    def ground_truth(self) -> GroundTruth
+```
+
+**强制手段**：优先用**进程边界**（策略跑在子进程，只通过 stdio 拿 `Response`）；退而求其次用类型边界 + 运行时断言（`assert not hasattr(surface, "ground_truth")`）。**「A2 能写代码」使这一条从卫生问题升级为效度问题**——泄漏是静默的，跑完才发现则全部重跑。
+
+### 种子与 6Sense 的喂食规则（v4 / D7 采纳项）
+
+| 对象 | v2 的写法 | v4 强制规则 |
+|---|---|---|
+| **B2（seed 密度贪心）** | 吃 `GroundTruth.seed_map` —— **预言机种子** | 二选一，**必须写死并在论文里声明**：(i) 所有 seed-based 策略（含 A1/A2 若使用）都吃**同一份公开 hitlist 切片**；(ii) 都不给 seed。**不得让"预言机种子"只喂给基线** |
+| **6Sense** | "用已知 aliased 前缀列表跑通" —— **那个列表就是答案** | 6Sense **明确标注为「预言机辅助上界」**，不是同侪对手。胜负带只对**信息条件对等**的策略计算；6Sense 单独成行、单独成表，并在论文里写清它拿到什么辅助输入 |
+| **A1/A2 的在线目标** | 未定义 | 必须定义 Agent **实际可优化的在线代理量**（如「响应率 × 新颖性 × 前缀分散度」的加权），并在论文里说明它与 `info_gain` 的关系。**否则"LLM 在 `info_gain` 上赢"不成立因果**——Agent 观察不到 `E`，无法优化 `info_gain`（outside voice #7） |
 
 **v2 说明**：Stage 1 **不使用**下面的种子文件格式——Stage 1 的真值直接来自 Punching Bag 的 JSON config（`ipv6_prefix` + 四个 `*_response_rate` 字段）。下面这个 schema 是 **Stage 2 拓扑层**（我们 fork 后加的路由器/错误仿真）的格式，先保留待用：
 
@@ -273,19 +354,45 @@ info_gain = I(Probes ; E) = H(E) − H(E | Probes)
 
 **Stage 1 的主端点 `discovered_real_prefixes`（v2 新增）** = 被证实为「真有内容」的前缀数量（去重）。判据：对一个此前未确认的前缀发出探测并收到响应，且该前缀 `aliased=False`。**没有路由器可数，所以 Stage 1 数前缀。** 它与 `aliased_waste` 一起构成 Stage 1 的胜负依据。
 
-**主端点与胜负判据（评审要求补）**：
+**主端点与胜负判据（v4 重写 / D8 采纳项 —— outside voice #8 / #9 / #17）**
+
+v3 写的是「CI 下界高于最优基线的 CI 上界」。**outside voice #8 指出这不是 5% 检验，而是约 p<0.005 的极端保守判据，会系统性制造假阴性**——而"LLM 没赢"恰恰是最可能的真实结果，两者混在一起就再也分不清了。更浪费的是：**所有策略跑在同一组 30 个 seed 上，配对检验本来可用且功效高一个量级，v3 把它扔了。**
+
+| | v3 | **v4（定稿）** |
+|---|---|---|
+| 检验 | CI 不重叠 | **同 seed 配对**：每 seed 算策略间差值，对差值做检验（Wilcoxon signed-rank / 配对 t） |
+| 主终点 | `true_routers`（连续，依赖估计器） | **可数量**：Stage 2 = `true_routers`；Stage 1 = **`aliased_waste_ratio`**（花在 aliased 前缀上的预算占比）与 **`aliased_caught`**（预算耗尽前正确识别的 aliased 前缀数） |
+| `info_gain` | 主端点 | **降为次要**：保留作理论叙事与诊断，不再作为"胜/负"依据 |
+| 多重性 | 未处理 | **补校正**（8 策略 = 28 次两两比较，Holm–Bonferroni） |
+| 报告 | 只报 seed 均值 + CI | **报每 seed 分布**（箱线/散点），否则 LLM 的双峰性被均值吃掉 |
+
+**为什么 `info_gain` 降级（outside voice #9 / #17）**：它的实体空间在 Stage 1 只有几十个前缀，`H(E) ≤ log₁₆(50) ≈ 1.4` hexit，而 `Probes` 是自适应选取、非独立同分布——**插入式熵估计量恰在这个区间有偏**。它仍是论文声称的贡献（P3）里最漂亮的一环，但**最漂亮的指标不该同时是最不可靠的那一个**。两个可数量有精确 config 真值、无估计量偏差、直接支撑陷阱叙事，因此顶上来做判据。
 
 - 预算：每个策略 **1000 次探测**（固定，非可选）。
-- 每个策略跑 **N = 30 个 seed**，取均值并报 **95% 置信区间**。
-- **主端点 = `true_routers`。** 判"胜"的条件：某策略 CI 下界 **高于** 最优基线的 CI 上界。
-- `aliased_waste` 与 `info_gain_per_1k` 是次要诊断量，不是胜负依据。
+- 每个策略跑 **N = 30 个 seed**；主判据用配对检验，`info_gain` 继续报均值 + 95% CI 供参考。
 - **单次运行不构成证据。** 这条直接来自 P4——己所不欲。
 
 **"发现一个路由器"的定义**：收到一个 `indirect=True` 且该 `src` 属于 `GroundTruth.routers` 的响应，且该 `src` 未被此前的探测发现过。超时/无响应不计。若某前缀 `aliased=True`，其所有响应来源都映射到同一个真值实体，因此**第二次起不再计入**——这正是 aliasing 让朴素策略收益归零的机制。
 
 **LLM 决策粒度**：LLM **按决策 epoch 调用，不按包调用**（导师报告 §4：Agent 不应为每一个 packet 调用 LLM）。一个 epoch = 一个策略段的开始，例如每 100 次探测决策一次。**总 API 调用量 = 策略数 × (1000 / epoch_size) × N，不是 1000 × 策略数 × N。** 这个常数在实现时必须显式配置并记录成本。
 
-**可复现性与 LLM 的矛盾（评审指出，已解）**：LLM 有 API 不确定性，与"逐字节可复现"冲突。解法：**决策缓存**——以 `hash(state) + seed` 为键缓存 LLM 的每一次决策，重跑时命中缓存。`FakeNet.reset(seed)` 保证网络侧严格可复现；缓存保证 LLM 侧在重跑时可复现。**首次运行不保证可复现，重跑保证**——这个措辞必须写进论文。
+**可复现性与 LLM 的矛盾（v4 重写 / D9 采纳项 —— outside voice #11）**
+
+LLM 有 API 不确定性，与"逐字节可复现"冲突。解法是**决策缓存**，但 v3 的键是错的：
+
+| | v2/v3 | **v4（定稿）** |
+|---|---|---|
+| 缓存键 | `hash(state) + seed` | `hash(canonical(state)) + seed + hash(prompt) + hash(tool_pool)` |
+| `state` 的构造 | 未规定 | **必须规范化**：集合排序、与回包到达顺序无关 |
+
+**两个独立的 bug，v3 只修了其中一个：**
+
+1. **键里没有 prompt 版本、没有工具池版本**（v3 的 Issue 4A 已修）——改 prompt 或给 A2 加原语后重跑会全量命中旧缓存，结果不变，误判为"改动无效"。**而 A1 与 A2 的唯一差别就是工具池,这个 bug 正落在 P1 的对照上。**
+2. **并发使 `state` 依赖回包到达顺序**（v3 漏掉，outside voice #11）。Issue 5 加了并发池，Issue 4 定了缓存键，**但两条从未放在一起看**：并发下到达顺序每次不同 → `state` 不同 → `hash(state)` 不同 → **缓存永不命中 → LLM 每次重问 → 不可复现**。解法是 `state` **规范化**（集合类字段排序、时间类字段用逻辑序号而非墙钟、任何与到达顺序相关的量必须显式排序或聚合后再入 `state`）。
+
+`reset(seed)` 保证网络侧严格可复现；规范化 + 完整缓存键保证 LLM 侧在重跑时可复现。**首次运行不保证可复现，重跑保证**——这个措辞必须写进论文。
+
+> **LLM 身份必须固定（outside voice #16）**：模型 ID、版本、温度、top_p、max_tokens、调用日期，全部写进 `agent/config.json` 并随缓存一起发布。没有这些，"LLM 赢/输"在通常意义上不可复现——缓存只是把一次运行对着一个模型重放。
 
 ---
 
@@ -335,7 +442,7 @@ B1–B5 是基线，A1–A2 是被测对象。**这张表就是项目的第一�
 
 **A1 vs A2 的差别就是 P1 的全部内容**：A1 是封闭工具池（正是 subagent 批评的"动作空间啰嗦的 RL agent"），A2 允许构造新原语。**两者之差就是"开放动作空间"这个卖点是否成立。**
 
-**关于 trap 曲线**——这两条线**具体是 B4 vs B5**（表述必须写死，否则"两条线"在七行表里指代不明）：机制是 aliased 前缀边际信息增益为 0，所以 B4（按响应率分配预算）会持续把预算投入"看起来最丰富"的地方，其 `true_routers` 累积曲线**上升后趋平**；而 B5（能识别 FRP 签名并改道）曲线持续上升，**两条线在中途交叉**。
+**关于 trap 曲线**——这两条线**具体是 B4 vs B5**（表述必须写死，否则"两条线"在八行表里指代不明）：机制是 aliased 前缀边际信息增益为 0，所以 B4（按响应率分配预算）会持续把预算投入"看起来最丰富"的地方，其 `true_routers` 累积曲线**上升后趋平**；而 B5（能识别 FRP 签名并改道）曲线持续上升，**两条线在中途交叉**。
 
 > **一个必须正视的后果（评审第三轮指出，我认）**：这个 killer demo 的**主角是 B5——一个非 LLM 的手写启发式**。也就是说，**最能卖这篇论文的那张图里没有 Agent**。诚实地讲，这削弱了"Agent 是主角"的叙事。它同时也是本设计最诚实的部分：如果 Agent 的价值要靠一张不含 Agent 的图来卖，那说明真正的贡献确实是**靶场与指标**（P3），而不是 Agent。**这个后果写进 Reviewer Concerns，不在设计层掩盖。**
 
@@ -355,19 +462,29 @@ B1–B5 是基线，A1–A2 是被测对象。**这张表就是项目的第一�
 6. **（v2 新增）6Sense 到底能不能在 Punching Bag 里跑起来？** 它是 Stage 1 唯一承诺复现的对手，也是论文里唯一能处理 aliasing 的算法。但论文自己写了它需要**额外输入**：一份已知 aliased 前缀列表，以及 IP-to-AS 映射。**如果这些辅助数据拿不到、或 6Sense 跑不起来，Stage 1 就失去了外部参照**，只剩我们自己写的 B1–B5 互相比——那会显著削弱 Stage 1 的说服力。**Stage 0 阶段就要验证这件事**，不要等到 Stage 1 写完才发现。
 
 7. **（v2 新增）`info_gain` 在 Stage 1 的实体空间下，分辨率够不够测出策略差异？** Stage 1 的实体 `E` 是**几十个前缀**的集合，`H(E)` 的上限约 `log₁₆(50) ≈ 1.4` 个十六进制位——**分辨率可能低到任何策略都拿到差不多的分数**。这是 Stage 1 指标层的真实风险，且 v1 从未评估过（v1 的 `E` 是上千个路由器，不存在这个问题）。**必须先用小规模预实验确认区分度**，否则可能写完一整套 harness 才发现指标测不出东西。若确实测不出，退路是改用连续量（如 aliased 前缀上的探测占比）当主端点。
+   > **✅ v4 已按退路处理（D8）**：不等预实验——**主端点直接改成可数量**（`aliased_waste_ratio` / `aliased_caught`），`info_gain` 降为次要诊断量。预实验仍要做，但它的作用从"决定成败"降为"确认次要指标是否值得报"。这条 OQ 从**阻塞级**降为**参考级**。
 
 ---
 
 ## Success Criteria
 
-**Stage 1 的完成判据（v2 重写）：**
+**Stage 1 的完成判据（v4 重写，定位见下）**
 
-1. **接口层**：`NetworkUnderTest` 定义完成，**`PunchingBagNet`** 可跑（v2：不再是 `FakeNet`），同一 config + 同 seed 重跑时**网络侧**逐包相同（Punching Bag 的响应确定性使这一点可验证；LLM 侧依赖决策缓存，见上）。
-2. **指标层**：`score()` 对着 `GroundTruth` 算出四个指标，并在**手工小 config** 上验证正确——至少两个极端用例：全 aliased（评分器必须判定探测全部浪费）、全非 aliased（`aliased_waste == 0`）。**注意 v2 的极端用例不再是"全是真路由器"**——Stage 1 没有路由器。
-3. **Stage 1 第一张表**：七行表（B1–B5、A1–A2）跑出来，30 seeds，带 95% CI，数字可复现（LLM 两行靠随包发布的决策缓存复现）。**外加 6Sense 一行**作为外部参照（能否跑通见 Open Question 6）。
-4. **可证伪**：若 LLM 决策体没有击败 baselines **和 6Sense**，**这依然是"做完了"**——harness 与指标层是完整贡献，且负结果有明确科学结论。
+> **定位变更（D11）**：Stage 1 **不再是"完整交付物"，是 Stage 2 的 harness 前置**。它的真正产出是 `ProbeSurface` 适配器、评分器、基线套件与决策缓存机制——这四样 Stage 2 原样复用。**Agent 在 Stage 1 的结果是探索性的，不是本阶段的成败依据。**
 
-**Stage 2 的完成判据**：fork 与原版的**逐包等价性测试通过**（Concern #6），`true_routers` 能被算出来，原语构造实验完成且预注册的三条要求满足。
+1. **接口层**：`ProbeSurface` / `Oracle` **分离**完成（D7），`PunchingBagNet` 可跑，同一 config + 同 seed 重跑时**网络侧**逐包相同；**断言策略侧无法触及任何真值字段**（D7 的强制项，进 CI）。
+2. **指标层**：`score()` 对着 `GroundTruth` 算出全部指标，并在**手工小 config** 上验证正确——至少两个极端用例：全 aliased（评分器必须判定探测全部浪费）、全非 aliased（`aliased_waste == 0`）。**极端用例不是"全是真路由器"**——Stage 1 没有路由器。
+3. **配置规格写死**（D10 / outside voice #10）：Stage 1 的 config 必须**显式规定**前缀数、aliased 占比、响应率分布，并随代码发布。**并跑一个平凡基线 B0「全探一遍」**：若 B0 也能拿到接近最优的分数，说明任务退化（`E` 塌缩成 aliased/not 二分），**这是可观测的警报，必须重新设计 config**。
+4. **Stage 1 第一张表**：**八行表**（B0–B5、A1–A2）跑出来，30 seeds，**主判据用配对检验**（D8），`info_gain` 报均值 + CI 供参考，每 seed 分布一并给出。**6Sense 单独成行、单独成表**，标注为预言机辅助上界（D7）。
+5. **可证伪**：若 A1/A2 在 Stage 1 **没有**显著胜过 B4/B5，**这依然是"做完了"**——而且与 P1 相容：封闭动作空间下，开放动作空间的优势**本就应当消失**（见 P1 的 v4 重写）。**Stage 1 的"负面"Agent 结果因此不是失败，是对 P1 一半的正确检验。**
+
+**Stage 2 的完成判据（v4 修改：不再要求逐包等价性）**
+
+> **路线变更（D9 / outside voice #18）**：v2/v3 让 Stage 2 **fork Punching Bag 的包路径**去合成合法 ICMPv6 错误（正确校验和、合成源地址、hop-limit 语义）——一个 C++17 raw-socket/libnet/libpcap 的系统任务，**没有任何工作量估算覆盖它**，却是全项目最高风险项，还附带整个 Concern #6 的逐包保真度负担。
+>
+> **v4 改为 Response 层 shim**：Stage 2 需要的是**用于评分的真值路由器集合**，而不是线上行为的仿真。一个合成 `Response` 层直接产出 `indirect=True` 的响应与 `GroundTruth.routers`，**不碰 Punching Bag 的线上行为**——于是逐包等价性测试、修改第三方产物的反对意见、以及那个未估算的 C++ 关键路径**一并消失**。代价是 Stage 2 的"真实感"止于 Response 层；**但 P4 表格本就承认 Stage 2 无外部效度**，包级真实感买不到任何东西。
+
+判据：`true_routers` 可算且经手工拓扑验证；原语构造实验完成且预注册的三条要求满足（见 Next Steps 第 6 步）；**若导师或审稿人明确要求线上行为级仿真，则回退到 fork 路线，但那是被要求后才付的代价**。
 
 **全局判据（v1 保留，不因分阶段而放松）**：明确不算"做完"的版本 = Agent 能跑通但没对着真值打过分的任何版本。
 
@@ -415,9 +532,9 @@ B1–B5 是基线，A1–A2 是被测对象。**这张表就是项目的第一�
 
 1. **`NetworkUnderTest` 接口 + `PunchingBagNet` 适配器**（v2：**不再是 `FakeNet`**）。schema 见上文；`PunchingBagNet.probe()` 把 `Response` 从 Punching Bag 的逐包日志映射出来，`ground_truth()` 读同一份 JSON config。
    > **一个被证伪的前提，v1 这里写错了**：v1 写"aliasing 分布从 Hitlist 真实标签取，`labeled_from` 强制标注来源"，是为了对抗"凭空编 aliasing = 循环论证"。**v2 下这个问题消失了**——aliasing 直接写在 Punching Bag 的 config 里（`response_rate = 1.0` 的那些前缀），而 **config 即真值**，不需要外部标签。`labeled_from` 字段保留，但内容改成**记录 config 文件名 + Punching Bag 的 commit hash**（可溯源的对象从"标签来源"变成了"靶场版本"）。**这个简化不是我们取巧，是换了靶场带来的真实收益。**
-2. **五个基线策略**：B1 均匀随机；B2 seed 密度贪心（seed 来自 `GroundTruth.seed_map`）；B3 bit-reversal 拟随机（照 6Seeks Theorem 1：offset < 2^(x−48) ⇒ 每个 /x 前缀至多 1 次探测）；B4 响应率自适应 bandit；B5 FRP-aware 手写启发式。**B1–B3 必须笨但正确；B4/B5 要认真写——它们是 LLM 真正的对手**，写弱了整个实验就没意义了。
+2. **基线策略（v4：六个，新增 B0）**：**B0 全探一遍（平凡基线，D10 新增）**；B1 均匀随机；B2 seed 密度贪心（**seed 来源按 D7 的规则写死**——不得单独吃预言机种子）；B3 bit-reversal 拟随机（照 6Seeks Theorem 1：offset < 2^(x−48) ⇒ 每个 /x 前缀至多 1 次探测）；B4 响应率自适应 bandit；B5 FRP-aware **按 6SEVEN 已发表的 online alias detection 实现**（每唯一前缀在 /48 /64 /96 /112 /116 /120 六种长度各发 3 次随机后缀探测，≥2 次 Echo Reply 即判 aliased）。**B0 是退化警报；B1–B3 必须笨但正确；B4/B5 要认真写——它们是 LLM 真正的对手**，写弱了整个实验就没意义了。
 3. **评分器 `score()` + `info_gain` 估计器**，用已知答案的手工拓扑做单元测试（含上述两个极端）。
-4. **跑出第一张七行表**（1000 探测 × 30 seeds + CI）。此时项目已有可展示的东西。
+4. **跑出第一张八行表**（B0–B5、A1–A2；1000 探测 × 30 seeds；配对检验 + 每 seed 分布）。此时项目已有可展示的东西。
 5. **接 LLM 决策体**：schema 约束的 dict 输出 + 独立 reasoning 字符串；命令由**已验证原语**拼装，`shell=False`，reasoning 永不进入命令；按 epoch 调用，决策缓存落盘。（参考 Dark Agents Recon 模式。）
 6. **原语构造实验（必做）**——P1 的唯一测法。
 
@@ -441,17 +558,22 @@ B1–B5 是基线，A1–A2 是被测对象。**这张表就是项目的第一�
    > Stage 2 给靶场加的「外围 / 间接响应」模式，是一个**确实不在 Stage 1 工具池里**的原语——A1（固定池）在定义上就用不了它，A2 必须自己发现这个缺口并把原语构造对。这比 v1 凭空设计一个场景更自然。
    > **但 Reviewer Concern #2 的批评依然成立**：A1 的失败仍然带有同义反复的成分（场景设计者知道 A1 是对照组）。**唯一让这个实验有说服力的，是 A2 的成功不是必然的**——A2 完全可能构造出一个坏原语（包格式对但产不出信息增益），这一点上 A1 与 A2 的差别就不是定义上的了。**预注册场景选择规则、多个场景、非场景作者裁决，三条一样不能省。**
 
-**Stage 2 — fork Punching Bag，把 periphery 拉回来（v2 新增）**
+**Stage 2 — 开放动作空间的场地 + periphery 拉回来（v4 重写：不再 fork 包路径）**
 
-7. **fork + 等价性测试（先做这个，再写任何新功能）**。见 Reviewer Concern #6：在同一 config、同一确定性响应模型下，**fork 与原版必须逐包等价**。这个测试进 CI，是 Stage 2 一切数字的前提。
-8. **加「ICMPv6 错误 / 路由器仿真」模式**：某个前缀下的地址若被判为"不可达"，回 `ICMPv6 Destination Unreachable`（type 1），**源地址设为合成的最后一跳路由器地址**，并带可配的 hop limit。这正是作者列为 future work 的协议扩展方向，也是 `Response.indirect` 与 `GroundTruth.routers` 唯一可能的来源。
-9. **在 Stage 2 靶场上重跑七行表**，主端点换成 `true_routers`，并补做上面第 6 步的原语构造实验。
+> **v4 路线变更（D9 / outside voice #18）**：v2/v3 的第 7 步是「fork Punching Bag 并做逐包等价性测试」，第 8 步是「往里加 ICMPv6 错误 / 路由器仿真」。**这两步是同一个高风险 C++ 系统任务**，而且 **Concern #6 的整个保真度负担都挂在这里**。v4 改为 Response 层 shim——理由见 Success Criteria 的 Stage 2 判据。
+>
+> **原第 8 步的内容（合成 `ICMPv6 Destination Unreachable`、源地址设为最后一跳路由器、可配 hop limit）没有丢**，它从"改 Punching Bag 的包路径"变成"在 shim 里按规则合成"，**协议语义的设计要求一字未减，只是不再需要动 C++**。
+
+7. **`RouterShim` 适配层**：实现一个 Response 层的合成器，在 `PunchingBagNet` 之上叠加「外围 / 间接响应」模式——某个前缀下的地址若被判为"不可达"，产出 `icmp_type=1`、**源地址为合成的最后一跳路由器地址**、带可配 hop limit 的合成 `Response`，并同步产出 `GroundTruth.routers`。
+   - **验证**：在手工拓扑上逐字段比对合成 `Response` 与期望。（v3 要求的"逐包等价性测试"**不再需要**——因为不改原版行为；但 shim 自身的契约测试仍必须进 CI。）
+   - **保留的口子**：若导师或审稿人明确要求线上行为级仿真，回退到 fork 路线并**在那时才付等价性测试的代价**。
+8. **在 shim 靶场上重跑八行表**，主端点换成 `true_routers`，并补做 Stage 1 第 6 步的原语构造实验。**这才是 P1 完整检验的场地**（见 P1 的 v4 重写与 D11）。
 
 **Stage 3 — 要规模与外部有效性时才做**
 
 10. **`NetnsNet`**：真 netns、真包，验证**协议栈保真度**——**不提供外部有效性**（见 P4 表）。
-    > **v1 这里要求"补上 FakeNet 没建的三个真实世界因素：限速、畸形响应、部分 ICMP 报文"。v2 修正**：**限速 Punching Bag 已经有了**（论文 §4.1 专门测了各 TGA 对 rate limit 的遵守情况），这一项自动获得；**畸形响应与部分 ICMP 报文仍然缺**，需要在 Stage 2 的 fork 里一并补，或至少记录为已知偏差。
-11. **`ReplayNet`**：接 6Seeks 公开 /48 列表 + RouteViews + Hitlist aliased 标签。**这是唯一能产生外部有效性的后端。**
+    > **v1 这里要求"补上 FakeNet 没建的三个真实世界因素：限速、畸形响应、部分 ICMP 报文"。v2 修正**：**限速 Punching Bag 已经有了**（论文 §4.1 专门测了各 TGA 对 rate limit 的遵守情况），这一项自动获得；**畸形响应与部分 ICMP 报文仍然缺**，需要在 Stage 2 的 `RouterShim` 里一并补（v4：不再改 fork），或至少记录为已知偏差。
+11. **`ReplayNet`**：接 6Seeks 公开 /48 列表 + RouteViews + Hitlist aliased 标签。**真值契约按 D12 收窄**——它提供可验证的响应序列与可回放的实验条件，**不冒充"真实路由器集合"**；主端点只能是策略间**相对比较**，不能是需要绝对真值的量。它是**稳健性检验**，不是 P1 的检验场地（v4 改口：P1 的场地是 Stage 2）。
 12. 复盘 Open Question 3：LLM 到底在哪个决策点上赢，或者它根本没赢。
 
 **顺序说明**：Stage 0–2 完全不依赖导师的数据——**这是刻意的**，让最可能阻塞的部分（数据可得性）推迟到 Stage 3 才需要答案。**v2 比 v1 更进一步**：v1 的 Phase 1 还需要公开的 Hitlist aliased 标签，v2 的 Stage 1 连这个都不需要了——Punching Bag 的 config 即真值。**外部数据依赖被压缩到只剩 Stage 3 一处。**
@@ -509,16 +631,22 @@ B1–B5 是基线，A1–A2 是被测对象。**这张表就是项目的第一�
 
 > **3.** "B5 fairness is unfalsifiable on FakeNet and A2-vs-B5 is the true P1 test if B5 may also construct primitives."
 > **中文**：**这是本设计最尖锐的未解混淆。** 若 B5（手写启发式）**同样有权编写新原语**（公平性协议第 3 条要求的），那 A2 vs B5 就退化成"LLM 写的代码 vs 人写的代码"，而这**恰恰是 P1 真正要回答的问题**——那么"LLM 扩动作空间"到底独特在哪？在 `FakeNet` 上这个问题**不可证伪**（因为映射是我们写的）。**结论：P1 的最终答案只能来自 `ReplayNet`，且可能需要重新表述成"LLM 在这类任务上比人写启发式更省人力/更会迁移"，而不是"LLM 能做 RL 做不到的事"。** 这个降级是真实的，不是修辞上的退让。
+>
+> **v4 部分消解（D6 重写的直接收益）**：这条最尖锐之处在于「若 B5 也能写原语，A2 vs B5 就退化成『LLM 写的代码 vs 人写的代码』」。**D6 把 P1 从"LLM vs RL"改写为"开放 vs 封闭动作空间"之后，这个问题不再是对 P1 的反驳，而正是 P1 要测的东西**——B5 若能写原语，它就在开放一侧；A2 与它的比较是"同一个开放空间里，两种构造机制谁更好"，这是合法且有意义的比较。**仍未解决的残余**：(a) 场景由实验者设计（Concern #2 的三条要求照旧）；(b) 在 `RouterShim` 上真值映射仍是我们写的，所以**结论的措辞仍须限定在"该 shim 定义下"**。
 
 > **4.** "N=30 needs a power justification."
 > **中文**：N=30 是**断言**，不是推导出来的。配合"CI 不重叠才算胜"的判据，这个研究**可能是欠功效的**——届时"LLM 没赢"与"功效不足"无法区分。**必须先按方差估功效**，再定 N；估不出来就先跑小规模预实验。**这条直接关系到 Success Criterion 4（负结果也算成功）能否成立**：欠功效的负结果不算结论。
+>
+> **v4 部分消解（D8）**：两个真实缺陷被修掉——(a) 判据从「CI 不重叠」（≈ p<0.005）改为**同 seed 配对检验**，功效提升约一个量级，**N=30 大概率够用**；(b) 主终点从依赖熵估计器的 `info_gain` 改为**可数量**，去掉了估计量偏差这一层噪声。**仍须做的**：按方差正式估功效并写进论文（这一条不因 D8 而免除）；补 21 次两两比较的多重性校正；报每 seed 分布而非只报均值。
 
 > **5.** "Trap-curve demo features no Agent."
 > **中文**：最能卖这篇论文的那张图（trap 曲线，B4 vs B5）**主角是非 LLM 的手写启发式，图里没有 Agent**。这削弱了"Agent 是主角"的叙事，**从另一个方向印证了 P3 的判断**：真正的贡献是靶场与指标，不是 Agent。**不要在写作中掩盖这一点**——把它变成论点：*正因如此，这个领域此前才无法回答"哪种决策范式更好"，因为连一张能画出这种曲线的评测台都不存在。*
 
 ---
 
-> **6.（v2 新增，本轮自发现）** "Forking Punching Bag means the periphery results rest on a modified third-party artifact; the fidelity of the modification is itself an unverified claim."
+> **6.（v2 新增，本轮自发现；v4 经 D9 消解）** "Forking Punching Bag means the periphery results rest on a modified third-party artifact; the fidelity of the modification is itself an unverified claim."
+>
+> **✅ v4 消解**：D9 把 Stage 2 从「fork 包路径」改为「Response 层 shim」——**我们不修改第三方产物的线上行为**，因此"改过的东西保真度如何"这个问题不再存在。代价见 Success Criteria 的 Stage 2 判据：真实感止于 Response 层，而 P4 本就承认 Stage 2 无外部效度。
 > **中文**：Stage 2 的结论建立在**被我们改过的**第三方工具上。审稿人一定会问：你怎么证明你加的「路由器 / ICMPv6 错误」模式没有同时改变原有的响应行为？这不只是"写个测试"的问题——**它是 Stage 2 的科学前提**。**已有的解法**：Punching Bag 的响应是确定性的（hash 目的地址 mod 100），所以**同一 config、同一 seed 下，fork 与原版必须逐包等价**，这是一个可判定、可自动化、必须进 CI 的测试。**在写第一行 fork 代码之前先把这个等价性测试写出来**，否则 Stage 2 的一切数字都悬空。
 
 > **7.（v2 新增，本轮自发现）** "Stage 1 and Stage 2 have different primary endpoints and different validity sources; they cannot be merged into one results table."
@@ -526,4 +654,205 @@ B1–B5 是基线，A1–A2 是被测对象。**这张表就是项目的第一�
 
 ---
 
-**评审对 P1 的最终判断（值得单独记住）**：P1（LLM vs RL 的本质区别在于动作空间是否开放）**在 `FakeNet` 上无论怎么设计实验都无法被证实或证伪**，因为真值映射由我们编写。**P1 的答案只能来自 `ReplayNet`。** 设计层能做的到此为止——这不是设计的缺陷，是这道题的固有难度，也正是为什么 P3 把贡献放在 oracle 而不是结论上。
+> **8.（v4 新增，Outside Voice #5 提出）** "Stage 1's foundation is an unverified assumption about a third-party tool."
+> **中文**：v2 的「config = 真值，无循环性」简化建立在 **`response_rate = 1.0` ⇔ aliased** 上。但 Stage 0.2(b) 自己说响应率规则未知，并警告「aliased 前缀与 EUI-64 分配模式前缀长得很像」。**一个高响应率的 EUI-64 / 密集分配前缀会被误计为 aliased**，污染主终点与评分器真值。**映射是我们自己定的、且承重**——所以 Stage 1 并非无循环性，**循环性从「标签」搬到了「解释」**。
+> **状态**：**未解决，且是 Stage 0 的硬产出**——0.2(b) 原本只是"读源码回答一个问题"，现在升级为"确认这个映射是否成立，不成立则重设计评分器真值来源"。**在这条确认之前，Stage 1 的评分器接口不应该定稿。**
+
+---
+
+**评审对 P1 的最终判断（v4 重写）**
+
+v1/v2 的判断是：「P1 在 `FakeNet` 上无法证实或证伪，**答案只能来自 `ReplayNet`**。」
+
+**v4 改口**：这个判断里的「`ReplayNet`」是错的。P1 需要的不是**真实互联网**，而是**开放动作空间的场地**——两者不是一回事。Stage 2 的 `RouterShim` 就提供了这样一个场地：它加进来的「外围 / 间接响应」是 Stage 1 工具池里**确实没有**的原语，A1 在定义上用不了它，A2 必须自己发现缺口并构造对。**因此 P1 的完整检验场地是 Stage 2，不是 ReplayNet**（这也是 D11「重心移到 Stage 2」的技术理由）。
+
+`ReplayNet` 的作用随之降级为**稳健性检验**（D12）——检验 Stage 2 的结论在真实响应分布下是否仍成立。设计层能做的到此为止——这不是设计的缺陷，是这道题的固有难度，也正是为什么 P3 把贡献放在 oracle 而不是结论上。
+
+---
+
+# 工程评审 v3（`/plan-eng-review`，2026-10-03）
+
+MODE: **FULL_REVIEW**（Step 0 提议缩减范围，用户选择按 v2 原稿全量做）
+
+## Step 0 — Scope Challenge
+
+- **复杂度检查：触发。** Stage 1 现稿 ≈ 8 个模块，超过「2 个新 service」阈值。已按 skill 要求停下并向用户提出缩减方案（最小纵向切片 / 只做 Stage 0 / 全量）。**用户选择全量**，本评审据此进行，后续不再重提缩减。
+- **搜索检查**：
+  - **[Layer 1]** `[Punching Bag]` —— 本地确定性靶场，直接复用，不自建。
+  - **[Layer 1]** `[6SEVEN]`（Kanipe et al., IMC 2026, arXiv:2609.08098）—— TGA 插件托管 + **共享 dealiasing** + tabulation。**推论：B5 不再自创启发式，改为按 6SEVEN 已发表的 online alias detection 实现**（对每个唯一前缀在 /48 /64 /96 /112 /116 /120 六种长度各发 3 次随机后缀探测，≥2 次 Echo Reply 即判 aliased）。这是**质量修复而非缩范围**：工作量不变，基线从「我们编的」变成「可引用的他人算法」，直接缓解 Reviewer Concern #3。6SEVEN 还发现 NTP seed 场景下多数 TGA 的 Echo Reply 被 ICMPv6 错误淹没——**这支撑 Stage 2 主线，但也说明「错误报文有信号」已非新发现。**
+  - **环境**：本机（Windows 11）无可用 WSL Linux 发行版（仅有 stopped 的 `docker-desktop`），但装有 **Docker 29.4.1**。Punching Bag 需 root + raw socket + netns → **用容器跑（`--cap-add=NET_ADMIN --cap-add=NET_RAW`），比装 WSL 发行版快**。Stage 0.1 的卡点解除。
+- **TODOS.md**：不存在。
+- **分发检查**：研究原型，分发计划已在本文档 Distribution Plan，无需改。
+
+## What already exists（不重复造）
+
+| 子问题 | 已存在的东西 | 本计划怎么做 |
+|---|---|---|
+| 本地确定性 ground-truth IPv6 靶场 | **Punching Bag**（IMC 2026, CC-BY 4.0） | 直接复用（Stage 1）；fork 扩展错误/路由器仿真（Stage 2） |
+| 响应行为下的真值 | Punching Bag 的 **JSON config 自身** | 薄导出脚本转成 `GroundTruth`，**不自建标注流程** |
+| aliasing 检测算法 | **6SEVEN 的 online alias detection**（已发表） | 作为 B5 的实现依据，不自创 |
+| 最强非 LLM aliasing 对照 | **6Sense**（Punching Bag 表 2 中唯一处理 aliasing 的算法） | 独立轨道复现（见 Issue 2） |
+| TGA 插件生态 | **6SEVEN** 已移植 8 个 TGA | 仅引用，不在 Stage 1 复用（接口不同构，见 Issue 2） |
+
+## 评审发现与决定
+
+5 条 finding，**全部采纳推荐项**。
+
+| # | 严重度 | 置信 | 发现（file:line 意义上的定位） | 决定 |
+|---|---|---|---|---|
+| 1 | P1 | 8/10 | `接口契约` 段的 `probe(self, dst, proto, hop_limit)` 只接受**单个目的地址**，而 `指标定义` 段的决策单位是**前缀**。Punching Bag 的 `default_response_rate` 可为 0.01，单包探测 99% 超时——与「该前缀为空」不可区分。**采样粒度是决定 trap 曲线能否出现的一等实验参数，v1/v2 均未定义。** | **1A** 加 `sample(prefix, n) -> list[Response]` 组合算子，粒度显式化、参数化、单独测 |
+| 2 | P1 | 8/10 | `Next Steps` Stage 1 第 3 步写「外加 6Sense 一行」——**架构上不成立**。表中每一行都是「调 `probe()` 拿反馈再决策」的策略；6Sense/6Scan/6Hit 自带 scanner 与预算记账，不经过 `NetworkUnderTest`。 | **2A** 6Sense 走**独立轨道**（自带 scanner），跑同一个 Punching Bag；两张表，只在「预算 vs 发现的真前缀」层面对比 |
+| 3 | **P1 / critical** | 8/10 | Punching Bag 论文自述：超约 60 kpps 拥塞、队列满即丢包（`--max-queue-size` 默认 25 万）。**被丢的包在 harness 眼里就是「超时」，而超时的实验含义是「地址不存在」。** 无测试、无错误处理、**用户看不到任何异常**。 | **3A** 适配器读靶场 `queue_log` / 逐包日志做对账；实收 < 已发即判该次运行无效并**报错**，不把差值当超时 |
+| 4 | **P1 / critical** | 9/10 | `指标定义` 段写「决策缓存以 `hash(state) + seed` 为键」。**键里没有 prompt 版本、没有工具池版本。** 改 prompt 或给 A2 加原语后重跑会全量命中旧缓存 → 结果不变 → 误判为「改动无效」。**而 A1 与 A2 的唯一差别就是工具池，这个 bug 正落在 P1 的对照上。** 另：19 条计划路径中仅 3 条写了测试。 | **4A** 完整测试计划写进 plan（见下）；**缓存键加入 prompt 与工具池的内容哈希** |
+| 5 | P1 | 8/10 | 全量实验 = 1000 × 7 策略 × 30 seeds ≈ 21 万包，而**探测的绝大多数目标本就不存在，超时是常态**。串行等待下，超时压到 100ms 仍需 ≈5.8 小时/轮，默认 1s 则 ≈58 小时。与「可迭代」直接冲突。 | **5A** 并发探测池，同时多包在途，用 `(dst, icmp_id/seq)` 匹配回包；超时 = 「到点未匹配」而非阻塞等待 |
+
+### 接口修订（Issue 1A 的直接后果）
+
+```python
+class NetworkUnderTest:
+    def probe(self, dst, proto, hop_limit) -> Response     # 单包，语义不变
+    def sample(self, prefix, n) -> list[Response]          # 新增：显式采样粒度
+    def ground_truth(self) -> GroundTruth
+    def reset(self, seed) -> None
+```
+
+## 失败模式
+
+| 路径 | 失败方式 | 有测试？ | 有错误处理？ | 用户看得见？ |
+|---|---|---|---|---|
+| `probe()` | 靶场队列满丢包 → 伪装成超时 | 否 → **补**（3A） | 否 → **补对账** | **否（静默）** ← **critical gap** |
+| `probe()` | 迟到回包归属于错误的探测 | 否 → **补** | 否 | 否（静默） |
+| `probe()` | 发包失败（无 `CAP_NET_RAW` / 无路由） | 否 → **补** | 否 → **补** | 否（静默） |
+| `agent.py` | 缓存键漏 prompt/工具池版本 → 静默复用旧决策 | 否 → **补**（4A） | 否 → **补** | **否（静默）** ← **critical gap** |
+| `agent.py` | LLM 返回畸形/越界 dict | 否 → **补** | 否 → **补 schema 校验** | 否 |
+| `ground_truth()` | 前缀 `rate==0` 与「前缀不在 config 里」语义未区分 | 否 → **补** | 否 | 否 |
+| `ProbeSurface` | **策略越界读到真值字段**（D7） | 否 → **补**（进 CI） | 否 → **补类型/进程边界** | **否（静默）** ← **critical gap** |
+| `state` 组装 | **并发下到达顺序影响 `state` → 缓存永不命中 → 不可复现**（D9） | 否 → **补** | 否 → **补规范化** | **否（静默）** ← **critical gap** |
+| `RouterShim` | 合成响应与 `GroundTruth.routers` 不一致 | 否 → **补契约测试** | 否 | 否 |
+
+**四条 critical gap**（无测试 + 无错误处理 + 静默）：丢包伪装超时、缓存键漏版本、**策略越界读真值**、**到达顺序污染缓存键**。
+
+> 后两条是 Outside Voice 补上的——**v3 的评审把它们漏了，而且两条都是静默的**：一条让实验可被作弊，一条让实验不可复现，都不会报错。
+
+## NOT in scope（明确推迟）
+
+| 推迟项 | 理由 |
+|---|---|
+| 自建 `FakeNet` 仿真器 | P3a 被 Punching Bag 证伪，直接省掉整个模块 |
+| 在 Stage 1 复用 6SEVEN 的插件层 | 接口不同构（Issue 2）；且它不是本地靶场 |
+| Stage 1 复现 6Hit / 6Scan / 6Tree / AddrMiner-S / DET | 仅引用其已发表数字作背景；全套复现代价高且脆（6Tree 的 APD 会崩，6Sense 需额外输入） |
+| WSL2 发行版 | Docker 已可用，够跑 Punching Bag |
+| 跨平台支持（Windows 原生） | 靶场与探测层都要求 Linux 语义（raw socket / netns） |
+| CI/CD 流水线 | 研究原型；但有**两处必须进 CI**：能力隔离断言（D7）与 `RouterShim` 契约测试（D9）——**逐包等价性测试因 D9 改路线而不再需要** |
+| **fork Punching Bag 的包路径**（v4 / D9 推迟） | Response 层 shim 足够提供真值；P4 本就承认 Stage 2 无外部效度，包级真实感买不到东西。**若导师或审稿人明确要求线上行为级仿真，再回退** |
+| **Stage 1 复现 6Sense 之外的 6Hit/6Scan/6Tree/AddrMiner-S/DET** | 维持 v3 判定：仅引用其已发表数字作背景 |
+| **为 Stage 1 建"正面 Agent 结果"的包装**（v4 / D11 推迟） | Stage 1 定位已改为 Stage 2 的 harness 前置，Agent 结果标为探索性 |
+
+## 并行化策略
+
+| 步骤 | 触及模块 | 依赖 |
+|---|---|---|
+| S1 靶场容器 + 构建 + 读码 | `docker/`, 无源码改动 | — |
+| S2 真值导出 + 适配器（含 sample / 并发池 / 对账） | `src/adapter/` | S1 |
+| S3 评分器 + `info_gain` 估计器 | `src/scoring/` | S2（接口稳定即可并行） |
+| S4 五个基线 B1–B5 | `src/baselines/` | S2 |
+| S5 LLM 决策体 + 决策缓存 | `src/agent/` | S2, S3 |
+| S6 6Sense 独立轨道 | `external/6sense/` | S1 |
+
+**Lane A**: S1 → S2（顺序，共享靶场）
+**Lane B**: S3（S2 接口一定即可开工，与 S2 并行）
+**Lane C**: S6（只依赖 S1，可与 S2/S3 全程并行）
+**Lane D**: S4 → S5（顺序，依赖 S2；S5 另依赖 S3）
+
+启动 A + B + C 并行；A 完成后启动 D。**冲突提示**：S2/S3/S4/S5 都写 `src/`，但分属互不重叠的子目录；若合并成扁平结构会冲突，**建议一开始就分子目录**。
+
+**v4 新增任务（T10–T16）的归属**：
+
+| Lane | 任务 | 依赖 |
+|---|---|---|
+| A | **T13**（Stage 1 config + B0）→ **T10**（能力隔离） | T13 只依赖 D10 的决策，可最先做；T10 改 `src/adapter/`，与 T2 同目录 → **归 A，T2 之后** |
+| B | **T11**（配对检验）、**T14**（可数主端点） | 都在 `src/scoring/`，与 T4 同目录 → **归 B，T4 之后** |
+| D | **T12**（在线代理量）、**T16**（知识消融） | 都在 `src/agent/` → **归 D，T5 之后** |
+| — | **T15**（`RouterShim`） | 依赖 T2 的接口，但属 Stage 2，**S1 阶段不开工** |
+
+**冲突提示（v4）**：T10 与 T2 同写 `src/adapter/`、T11/T14 与 T4 同写 `src/scoring/`、T12/T16 与 T5 同写 `src/agent/`——**三处都在已占用的目录里**。因此 v4 的新任务**不新增并行度**，它们是各 lane 内的后续步骤。**唯一真正独立的新增项是 T13**（只写 `config/` 与 `src/baselines/b0_*.py`），可以最先单独起。
+
+## Implementation Tasks
+
+- [ ] **T1 (P1, human: ~1d / CC: ~1h)** — `docker/` — 容器化 Punching Bag 并锁定上游 commit
+  - Surfaced by: Step 0 环境检查 — 本机无可用 WSL 发行版，Docker 29.4.1 可用
+  - Files: `docker/punchingbag.Dockerfile`, `docker/compose.yml`, `CLAUDE.md`（登记 commit hash）
+  - Verify: 容器内 `--cap-add=NET_ADMIN --cap-add=NET_RAW` 起靶场，从任一 netns ping 到配置前缀能收到回包
+- [ ] **T2 (P1, human: ~2d / CC: ~2h)** — `src/adapter/` — `NetworkUnderTest` 实现：`probe` / `sample` / 并发池 / 丢包对账
+  - Surfaced by: Issue 1A、Issue 3A、Issue 5A
+  - Files: `src/adapter/punchingbag.py`, `src/adapter/probe_pool.py`, `src/adapter/iface.py`
+  - Verify: 单测覆盖 发包失败 / 迟到回包；集成测试断言 实收==已发，否则抛异常
+- [ ] **T3 (P1, human: ~4h / CC: ~30min)** — `src/adapter/ground_truth.py` — config → `GroundTruth` 导出
+  - Surfaced by: Stage 0.3 + 失败模式表（rate==0 与「不在 config 里」语义未区分）
+  - Files: `src/adapter/ground_truth.py`
+  - Verify: 手工小 config 逐字段比对；显式断言「未配置前缀」与「rate==0 前缀」是两个不同集合
+- [ ] **T4 (P1, human: ~1d / CC: ~1h)** — `src/scoring/` — `score()` + `info_gain` 估计器
+  - Surfaced by: 指标定义段 + Open Question 7（分辨率未验证）
+  - Files: `src/scoring/score.py`, `src/scoring/entropy.py`
+  - Verify: 全 aliased / 全非 aliased 两个极端；**外加一个小样本偏差标定测试**
+- [ ] **T5 (P1, human: ~1d / CC: ~1h)** — `src/agent/` — LLM 决策体 + 决策缓存（键含 prompt/工具池内容哈希）
+  - Surfaced by: Issue 4A（critical）
+  - Files: `src/agent/decide.py`, `src/agent/cache.py`, `src/agent/prompts/`
+  - Verify: 单测断言「改 prompt 内容 ⇒ 缓存未命中」；schema 校验拒绝畸形输出
+- [ ] **T6 (P1, human: ~2d / CC: ~2h)** — `src/baselines/` — B1–B5，B5 按 6SEVEN online alias detection 实现
+  - Surfaced by: Step 0 [Layer 1] 发现 6SEVEN；以及 B5 公平性协议
+  - Files: `src/baselines/b1..b5.py`
+  - Verify: B3 的 bit-reversal offset 规则单测；B5 的 6 长度 × 3 探逻辑单测
+- [ ] **T7 (P2, human: ~1d / CC: ~1h)** — `external/6sense/` — 6Sense 独立轨道
+  - Surfaced by: Issue 2A；Open Question 6（能否跑通未验证）
+  - Files: `external/6sense/`, `scripts/run_6sense.sh`
+  - Verify: 用已知 aliased 前缀列表跑通，复现论文表 2 的「0 次探测投给 aliased 前缀」
+- [ ] **T8 (P2, human: ~4h / CC: ~30min)** — `~/.gstack/.../test-plan-*.md` + plan 内测试要求 — 补齐 16 个测试 GAP
+  - Surfaced by: Section 3 覆盖图（3/19 → 目标 19/19）
+  - Files: `tests/`
+  - Verify: `pytest` 全绿且覆盖图上无 `[GAP]`
+- [ ] **T9 (P3, human: ~2h / CC: ~20min)** — `TODOS.md` — 建立并迁入推迟项
+  - Surfaced by: NOT in scope 表
+  - Files: `TODOS.md`
+
+### Outside Voice 采纳后新增的任务（v4）
+
+- [ ] **T10 (P1, human: ~4h / CC: ~30min)** — `src/adapter/surface.py` — **能力隔离**：`ProbeSurface` / `Oracle` 拆分
+  - Surfaced by: 评审 D7 — outside voice #6（策略与真值同对象，A2 会写代码）
+  - Files: `src/adapter/surface.py`, `src/adapter/oracle.py`, `tests/test_isolation.py`
+  - Verify: CI 断言策略侧对象不含任何真值字段；用子进程边界时，断言策略进程无法构造 `GroundTruth`
+- [ ] **T11 (P1, human: ~1d / CC: ~1h)** — `src/scoring/stats.py` — **配对检验 + 多重性校正 + 分布报告**
+  - Surfaced by: 评审 D8 — outside voice #8（CI 不重叠 ≈ p<0.005，制造假阴性；浪费同 seed 配对）
+  - Files: `src/scoring/stats.py`, `src/scoring/report.py`
+  - Verify: 在合成数据上验证配对检验的功效应高于 CI 不重叠；Holm–Bonferroni 的校正因子单测；报告含每 seed 分布
+- [ ] **T12 (P1, human: ~1d / CC: ~1h)** — `src/agent/objective.py` — **定义 Agent 的在线代理量**
+  - Surfaced by: 评审 D7 — outside voice #7（`info_gain` 需要预言机，Agent 观察不到，因果不成立）
+  - Files: `src/agent/objective.py`, `src/agent/prompts/`
+  - Verify: 单测代理量仅依赖 `Response`；论文中显式声明代理量与 `info_gain` 的关系
+- [ ] **T13 (P1, human: ~2h / CC: ~20min)** — `config/stage1_config.json` — **写死 Stage 1 配置规格 + B0 平凡基线**
+  - Surfaced by: 评审 D10 — outside voice #10（配置未定则主终点含义悬空、任务可能退化）
+  - Files: `config/stage1_config.json`, `src/baselines/b0_probe_all.py`
+  - Verify: B0 单独跑一遍；若 B0 接近最优则触发退化警报，重设 config
+- [ ] **T14 (P1, human: ~3h / CC: ~30min)** — `src/scoring/endpoints.py` — **主终点改为可数量**（`aliased_waste_ratio` / `aliased_caught`）
+  - Surfaced by: 评审 D8 — outside voice #9/#17（熵估计量在小实体空间有偏，而 Stage 1 实体只有几十个）
+  - Files: `src/scoring/endpoints.py`, `src/scoring/score.py`
+  - Verify: 两个极端用例 + 与 `info_gain` 的一致性检查（可数量应单调于 info_gain 但无估计量偏差）
+- [ ] **T15 (P2, human: ~1d / CC: ~1h)** — `src/adapter/router_shim.py` — **`RouterShim` 替代 fork 包路径**
+  - Surfaced by: 评审 D9 — outside voice #13/#18（fork 是最高风险项且无估算；真值只需 Response 层）
+  - Files: `src/adapter/router_shim.py`, `tests/test_shim_contract.py`
+  - Verify: 手工拓扑上逐字段比对合成 `Response` 与期望；合成的 `src` 集合 == `GroundTruth.routers`
+- [ ] **T16 (P2, human: ~4h / CC: ~30min)** — `src/agent/ablation.py` — **知识消融对照（A3）**
+  - Surfaced by: 评审 D6 — outside voice #2（无法区分"开放动作空间"与"预训练先验"）
+  - Files: `src/agent/ablation.py`, `src/agent/prompts/ablated/`
+  - Verify: 消融 prompt 里不含任何 IPv6 术语；A3 与 A1/A2 的同 seed 配对比较
+
+### 未采纳为 task 的 finding
+
+_无。_ v3 的五条 finding 全部落成 T2/T5；Outside Voice 的实质缺陷落成 T10–T16。
+
+## 测试计划产物（供 `/qa` 消费）
+
+- **受影响入口**：`src/adapter/surface.py::probe/sample`、`src/adapter/oracle.py::ground_truth`、`src/agent/decide.py::decide`、`src/scoring/score.py::score`、`src/scoring/stats.py`
+- **关键交互**：`probe()` → 并发池 → 回包匹配 → `Response`；`decide()` → 缓存查询 → LLM → schema 校验 → 动作；`state` 规范化 → 缓存键 → 命中/未命中
+- **边界情况**：靶场丢包（实收<已发）、迟到回包、无 `CAP_NET_RAW`、LLM 畸形输出、`rate==0` vs 未配置前缀、全 aliased 拓扑、**策略侧试图读取真值字段（D7）**、**并发下 `state` 到达顺序扰动（D9）**、**B0 拿到接近最优分（退化警报，D10）**
+- **关键路径**：一次 Stage 1 全量运行（**8 策略** × 30 seeds）能跑完、能对账、能产出**带配对检验结果与每 seed 分布**的表

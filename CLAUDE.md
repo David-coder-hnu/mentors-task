@@ -12,13 +12,15 @@
 | `IPv6_Agent_Probing_Research_Report.md` | 上述报告的 markdown 转写（原文中文，逐页对照页面图像核对） |
 | `6Seeks_A_Global_IPv6_Network_Periphery_Scanning_System.pdf` | IEEE ToN 2025 原文，关键基线论文 |
 | `6Seeks_中文全文.md` | 6Seeks 全文中文译读（含表 I–VI、图 1–16 图说、关键数字速查） |
-| `IPv6_Agent_探测_设计方案.md` | 设计方案（2026-10-03，`/office-hours` 产出，经 3 轮对抗式评审，**已修订到 v2**）。核心决定：贡献是靶场 + 可回放评分器，Agent 是靶场上的被测对象；LLM vs RL 的差异定为「动作空间开放 vs 封闭」且作为**待证伪假说**。**v2 的转折**：发现 Punching Bag（IMC 2026）本身就是这类靶场，故把贡献拆成两半——Stage 1 复用第三方靶场做响应率/aliasing 实验，Stage 2 fork 它补「ICMPv6 错误/路由器仿真」把 periphery 主线拉回来。含 7 行基线表、Stage 0–3 拆分、7 条 `Reviewer Concerns` |
+| `IPv6_Agent_探测_设计方案.md` | 设计方案（2026-10-03，`/office-hours` 产出，经 3 轮对抗式评审 + `/plan-eng-review` 四段评审 + Outside Voice，**已修订到 v4**）。核心决定：贡献是靶场 + 可回放评分器，Agent 是靶场上的被测对象。**v2**：发现 Punching Bag（IMC 2026）本身就是这类靶场，贡献拆两半。**v4**：P1 由「LLM vs RL」改写为「**开放 vs 封闭动作空间**」；Stage 2 由 fork 包路径改为 **Response 层 shim**；主终点由 `info_gain` 改为**可数量**；Stage 1 降为 Stage 2 的 harness 前置。含 8 行基线表（B0–B5、A1–A2）、Stage 0–3 拆分、8 条 `Reviewer Concerns`、T1–T16 任务清单 |
+| `TODOS.md` | 推迟项清单（尚未建立，见设计方案的 NOT in scope 表） |
 
 ## 代码（原型）
 
-- `src/` — 原型代码所在。四块：靶场适配层（`NetworkUnderTest` 接口）、基线策略集合、Agent 决策层、可回放评分器。
-- 靶场路线（复用第三方靶场 / 自建 netns 拓扑）尚未定稿，定稿后写进 `IPv6_Agent_探测_设计方案.md` 并在此登记。
-- 原型代码的目标是**做实验**，不是做产品：优先保证可回放（固定 seed、确定性响应）与 ground truth 可导出。
+- `src/` — 原型代码所在。四块：靶场适配层（**`ProbeSurface` / `Oracle` 必须分离**，见设计方案 D7）、基线策略集合（B0–B5）、Agent 决策层、可回放评分器。
+- **靶场路线已定稿**：Stage 1 复用 Punching Bag **原样**（不自建 `FakeNet`）；Stage 2 在其上加 `RouterShim`（Response 层合成，**不 fork 包路径**）。
+- 原型代码的目标是**做实验**，不是做产品：优先保证可回放（固定 seed、确定性响应、**状态规范化**）与 ground truth 可导出。
+- **两条硬约束**（违反则整组实验作废）：策略侧只能看到 `ProbeSurface`，**不得触及任何真值字段**；探测并发下 `state` 必须规范化，否则决策缓存永不命中。
 
 ## 约束
 
