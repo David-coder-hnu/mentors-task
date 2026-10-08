@@ -1,2 +1,9 @@
 # shell 脚本必须保持 LF：CRLF 会让 hook 的 shebang 失效
 *.sh text eol=lf
+
+# Docker 文件同理：本机 core.autocrlf=true，Windows 上 checkout 会把它们写成 CRLF，
+# 而 Dockerfile 的 `RUN … \` 续行遇到行尾 \r 会解析出错。这些文件是被 Linux 侧的
+# docker/compose 消费的，必须钉死 LF。
+Dockerfile* text eol=lf
+*.Dockerfile text eol=lf
+*.yml text eol=lf

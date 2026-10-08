@@ -1,0 +1,19 @@
+{
+  "_comment": "T1 冒烟专用，不是 Stage 1 的 config（那个归 T13 / config/stage1_config.json）。四档速率故意取同值：0.2(b) 的四档判定规则尚未读清（设计方案 :759），取同值可以让本测试不依赖那个未决问题。",
+  "subnets": [
+    {
+      "ipv6_prefix": "2001:db8:dead::/64",
+      "default_response_rate": 1.0,
+      "EUI_response_rate": 1.0,
+      "lower_response_rate": 1.0,
+      "higher_response_rate": 1.0
+    },
+    {
+      "ipv6_prefix": "2001:db8:0bad::/64",
+      "default_response_rate": 0.0,
+      "EUI_response_rate": 0.0,
+      "lower_response_rate": 0.0,
+      "higher_response_rate": 0.0
+    }
+  ]
+}

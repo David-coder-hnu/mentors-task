@@ -30,7 +30,12 @@
 - **仓库保持 private**：内含 IEEE 版权论文原文与全文翻译，转 public 会构成再分发版权内容。**若将来要开源原型代码，必须先把版权论文 PDF 与全文译读从待公开的内容里剥离**（拆仓库或调整 `.gitignore`），不能整仓库转 public。**这条规则已有执行机制，不靠人记忆**：版权材料收进 `docs/restricted/`，由导出脚本按排除清单产出干净副本并**断言副本不含该目录下任何路径**——见设计方案 `## Constraints` 段（Stage 0 交付物，门 0 条件 9）。
 - 6Seeks 论文**不公开**其发现的 1.28 亿个 IPv6 外围地址，只公开源码与活跃 /48 前缀。要做对比实验需先确认数据可得性，或自行复现。
 - **第三方论文不进仓库**：新下载的论文 PDF 放临时目录，不进版本库。引用第三方数据/代码时用「链接 + commit hash」的方式，不 vendor 原文。
-- 复用或改写第三方工具时，登记其许可证与上游 commit：Punching Bag 为 **CC-BY 4.0**（署名即可，允许改），上游 `github.com/tumi8/punching-bag`。
+- 复用或改写第三方工具时，登记其许可证与上游 commit。**Punching Bag**（`github.com/tumi8/punching-bag`）：
+  - **上游 commit（T1 锁定，2026-10-08）**：`cfe60b3e25a19113588cb5fe7313dd3da658d7ca`（`main`，提交日 2026-10-05）。写死在 `docker/punchingbag.Dockerfile` 的 `PB_COMMIT`，**构建期断言**回读的 HEAD 与它相等——不是注释里的一句话。
+  - 许可证是 **AGPL-3.0**（上游 `LICENSE`，全文 661 行）。⚠️ **本文件此前记为 CC-BY 4.0，是错的**；上游仓库唯一的许可证文件就是 AGPL-3.0，源码文件无独立头注、README 无许可证字样。**这个差别是承重的**：CC-BY 只需署名，AGPL 是**强 copyleft 且带网络条款（§13）**。
+    - **当前不受影响**：Stage 0/1 的本地研究使用不分发、不对网络提供服务，不触发任何义务。
+    - **会触发的情形**：分发 `docker/` 构建出的镜像；或走 TODOS 的 **fork 回退路线**（P4）并分发。届时衍生作品须以 AGPL 发布。
+    - **与前一条不是同一件事，别混**：「仓库保持 private」管的是*别把付费论文传出去*（再分发版权内容）；这一条管的是*用了 copyleft 代码就得按 copyleft 走*。**将来开源原型代码时两条都要过。**
 
 ## gstack (REQUIRED — global install)
 

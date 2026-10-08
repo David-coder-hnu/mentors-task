@@ -1,0 +1,97 @@
+# Punching Bag 冒烟靶场 —— T1 的验收装置
+#
+# 验收（设计方案 :1178）：容器内在 --cap-add=NET_ADMIN --cap-add=NET_RAW 下起靶场，
+# 从任一 netns ping 到配置前缀能收到回包。
+#
+# ── 为什么是「两个容器」而不是「一个容器里手搓 ip netns」────────────────────
+# Docker 的每个容器本来就在自己的 network namespace 里，所以"从任一 netns ping"
+# 用两个容器 + 一条自定义 IPv6 网络就能**如实地**表达，不必在容器内再叠一层 netns。
+# （容器内建 netns 需要 /var/run/netns 的 mount propagation，会与默认 seccomp/apparmor
+#  打架；等 harness 真需要内部 netns 时再单独解决，不该让它挡在门 0 前面。）
+#
+#   prober (2001:db8:1::3) ──┐
+#                            ├── bridge, 2001:db8:1::/64
+#   target (2001:db8:1::2) ──┘        ← punchingbag 监听 eth0
+#
+# ── 三个决定测试有效性的细节，缺一个测试就会以**错误的理由**通过 ────────────
+#
+#  1) **不能 ping target 自己的地址。** 那样的回包由 target 的**内核**发出，
+#     与 Punching Bag 毫无关系。所以探测地址落在 `2001:db8:dead::/64`——
+#     该前缀**不属于任何容器**，是被伪造的 aliased 前缀。
+#
+#  2) **prober 必须显式加路由。** `… via 2001:db8:1::2` 使得 L2 目的 MAC 是 target，
+#     而 L3 目的地址是 dead::1。上游 `pcap_open_live(iface, BUFSIZ, 0, 100, …)` 的
+#     第 3 个参数是 **promisc=0（非混杂）**，若不加这条路由，prober 会对 dead::1
+#     直接做邻居发现、永远问不到 MAC，**一个包都发不出去**，然后表现为"靶场没回包"。
+#
+#  3) **必须有负对照。** `2001:db8:0bad::/64` 配成 rate 0.0，必须收不到回包。
+#     只有正例的冒烟测试无法区分「config 真的生效了」与「config 没生效但碰巧通了」。
+#
+# ── 跑法 ────────────────────────────────────────────────────────────────
+#   cd docker
+#   docker compose up --build --abort-on-container-exit --exit-code-from prober
+#   # 退出码 0 = 正例 5/5 且负对照 0/5；容器全部退出后记得 docker compose down
+#
+# ── 注意 ────────────────────────────────────────────────────────────────
+#   smoke/punchingbag-smoke.json 是**本任务的脚手架**，不是 Stage 1 的配置规格；
+#   后者归 T13（config/stage1_config.json）。别把它当基线配置引用。
+
+name: punchingbag-smoke
+
+services:
+  target:
+    build:
+      context: .
+      dockerfile: punchingbag.Dockerfile
+    image: punchingbag:smoke
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    volumes:
+      - ./smoke/punchingbag-smoke.json:/config/smoke.json:ro
+    networks:
+      pbnet:
+        ipv6_address: 2001:db8:1::2
+    command:
+      - --interface=eth0
+      - --json-config=/config/smoke.json
+      - --thread-count=2
+
+  prober:
+    image: punchingbag:smoke
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    networks:
+      pbnet:
+        ipv6_address: 2001:db8:1::3
+    depends_on:
+      - target
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        # depends_on 只等容器启动，不等靶场就绪（pcap 还没打开时发的包会被丢掉）
+        sleep 3
+
+        ip -6 route add 2001:db8:dead::/64 via 2001:db8:1::2
+        ip -6 route add 2001:db8:0bad::/64 via 2001:db8:1::2
+
+        echo "=== 正例：2001:db8:dead::/64（rate 1.0）—— 期望 5/5 ==="
+        ping -6 -c 5 -W 2 -i 0.3 2001:db8:dead::1
+
+        echo "=== 负对照：2001:db8:0bad::/64（rate 0.0）—— 期望 0/5 ==="
+        if ping -6 -c 5 -W 2 -i 0.3 2001:db8:0bad::1; then
+          echo "FAIL: rate=0.0 的前缀收到了回包，config 未被遵守" >&2
+          exit 1
+        fi
+        echo "OK: 负对照无回包，符合预期"
+
+networks:
+  pbnet:
+    driver: bridge
+    enable_ipv6: true
+    ipam:
+      config:
+        - subnet: 172.31.66.0/24
+        - subnet: 2001:db8:1::/64

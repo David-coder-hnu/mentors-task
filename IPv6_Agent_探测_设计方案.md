@@ -10,7 +10,13 @@ Mode: Builder
 
 ## 修订记录 v2（2026-10-03）：Punching Bag 改变了靶场路线
 
-v1 定稿后，`/plan-eng-review` 的 Step 0 做了一次靶场搜索，发现 **Punching Bag**（Steger / Junginger / Carle / Zirngibl, ACM IMC 2026, DOI `10.1145/3777912.3839826`, CC-BY 4.0, `github.com/tumi8/punching-bag`）**本身就是一个 ground-truth IPv6 靶场**：单机上按前缀配置响应率、能伪造 aliased 前缀、确定性可复现（hash 目的地址 mod 100）、并已用它评测了 6 个已发表 TGA。
+v1 定稿后，`/plan-eng-review` 的 Step 0 做了一次靶场搜索，发现 **Punching Bag**（Steger / Junginger / Carle / Zirngibl, ACM IMC 2026, DOI `10.1145/3777912.3839826`, `github.com/tumi8/punching-bag`）**本身就是一个 ground-truth IPv6 靶场**：单机上按前缀配置响应率、能伪造 aliased 前缀、确定性可复现（hash 目的地址 mod 100）、并已用它评测了 6 个已发表 TGA。
+
+> **⚠️ 许可证更正（2026-10-08，T1）**：本节原把 Punching Bag 记为 **CC-BY 4.0**，**是错的**。上游 `LICENSE` 实为 **GNU AGPL-3.0**（全文 661 行；且仓内没有第二个许可证文件、源码文件无独立头注、README 无许可证字样）。**照代码事实读，就只能是 AGPL-3.0。**
+>
+> 这不是措辞问题：CC-BY 只需署名，**AGPL 是强 copyleft 且带网络条款（§13）**。本段下面的 `:842` 与 `## What already exists` 的 `:963` 两处已同步更正。
+>
+> **T1（2026-10-08）已锁定上游 commit `cfe60b3e…` 并把许可证与后果写进 `CLAUDE.md`**，此处不再重复，只记结论：**本地研究使用不触发义务；分发 `docker/` 镜像、或走 TODOS 的 fork 回退路线并分发，会触发。**
 
 这**部分证伪了 v1 的 P3**，也**部分消解了 Reviewer Concern #1**。但关键限定是：
 
@@ -839,7 +845,7 @@ B0–B5 是基线，A1–A3 是被测对象与归因对照。**完整表（含 A
 > | 导师的数据（128M 地址 / 数据可得性答复） | **仅 Stage 3** | 不能，但已被隔离到最晚期 |
 > | 公开 hitlist aliased 标签 | **Stage 2 的 `labeled_from` 溯源**（`:322` 强制字段） | 不能——它是把「循环论证」降到最低的唯一办法 |
 > | 公开 hitlist 切片（喂 B2 的种子） | **(ii) 之下不需要** | 已按 (ii) 避开 |
-> | Punching Bag / 6SEVEN 源码 | Stage 0 / Stage 2 | 不需授权，CC-BY 4.0 / 公开仓库 |
+> | Punching Bag / 6SEVEN 源码 | Stage 0 / Stage 2 | Punching Bag 为 **AGPL-3.0**——**本地使用不需授权，但「不需授权」不等于「没有义务」**：分发镜像或 fork 后分发会触发 copyleft（T1 段）。6SEVEN 为公开仓库 |
 > | 6Seeks 活跃 /48 列表 | Stage 3（`ReplayNet`） | 不能，但与导师的数据是两回事 |
 >
 > **结论**：`Stage 0–2 不依赖导师的数据` 成立；`外部数据依赖只剩 Stage 3 一处` **不成立**——**Stage 2 的 `labeled_from` 是一项公开数据依赖，它一直在计划里，只是从没被这句话计入。**
@@ -960,7 +966,7 @@ MODE: **FULL_REVIEW**（Step 0 提议缩减范围，用户选择按原稿全量�
 
 | 子问题 | 已存在的东西 | 本计划怎么做 |
 |---|---|---|
-| 本地确定性 ground-truth IPv6 靶场 | **Punching Bag**（IMC 2026, CC-BY 4.0） | 直接复用（Stage 1）；fork 扩展错误/路由器仿真（Stage 2） |
+| 本地确定性 ground-truth IPv6 靶场 | **Punching Bag**（IMC 2026, **AGPL-3.0**） | 直接复用（Stage 1）；fork 扩展错误/路由器仿真（Stage 2）——**fork 这条支路会触发 AGPL**，见 T1 段 |
 | 响应行为下的真值 | Punching Bag 的 **JSON config 自身** | 薄导出脚本转成 `GroundTruth`，**不自建标注流程** |
 | aliasing 检测算法 | **6SEVEN 的 online alias detection**（已发表） | 作为 B5 的实现依据，不自创 |
 | 最强非 LLM aliasing 对照 | **6Sense**（Punching Bag 表 2 中唯一处理 aliasing 的算法） | 独立轨道复现（见 Issue 2） |
@@ -1172,10 +1178,15 @@ class Oracle:                # runner 侧持有，策略进程拿不到（进程
 
 ## Implementation Tasks
 
-- [ ] **T1 (P1, human: ~1d / CC: ~1h)** — `docker/` — 容器化 Punching Bag 并锁定上游 commit
+- [x] **T1 (P1, human: ~1d / CC: ~1h)** — `docker/` — 容器化 Punching Bag 并锁定上游 commit
   - Surfaced by: Step 0 环境检查 — 本机无可用 WSL 发行版，Docker 29.4.1 可用
-  - Files: `docker/punchingbag.Dockerfile`, `docker/compose.yml`, `CLAUDE.md`（登记 commit hash）
+  - Files: `docker/punchingbag.Dockerfile`, `docker/compose.yml`, `docker/smoke/punchingbag-smoke.json`, `CLAUDE.md`（登记 commit hash）
   - Verify: 容器内 `--cap-add=NET_ADMIN --cap-add=NET_RAW` 起靶场，从任一 netns ping 到配置前缀能收到回包
+  - **已完成（2026-10-08）**：上游 commit 锁定为 `cfe60b3e25a19113588cb5fe7313dd3da658d7ca`——写死在 Dockerfile 的 `PB_COMMIT`，并**构建期断言**回读的 HEAD 与它相等。验收读数（`--exit-code-from prober`，退出码 0）：`2001:db8:dead::/64`（rate 1.0）**5/5 收到回包**；负对照 `2001:db8:0bad::/64`（rate 0.0）**0/5**。
+    - **负对照不是装饰**：只有正例时，「config 生效了」与「config 没生效但 ping 碰巧通了」的读数完全一样。
+    - **两个容器 = 两个 netns**。Docker 每个容器本就在自己的 netns 里，所以「从任一 netns ping」用两个容器 + 一条自定义 IPv6 网络即可如实表达；容器内再叠 `ip netns` 会与默认 seccomp/apparmor 打架，不该挡在门 0 前面。
+  - **拓扑约束（下游任务必读）**：上游 `pcap_open_live(iface, BUFSIZ, 0, 100, …)` 的第 3 个参数是 **promisc = 0（非混杂）**，且 `libnet_init(LIBNET_RAW6, nullptr)` 由 libnet 自选设备。所以 `PunchingBagNet.probe()` 必须让探测包的 **L2 目的 MAC 落到靶机**（compose 里那条 `via 2001:db8:1::2` 就是为此而加），否则 pcap **一个包都收不到**，而症状会表现为「靶场不回包」——一个指不到根因的现象。
+  - **附带发现（不是本任务的验收条件）**：许可证为 **AGPL-3.0**，见上面对 v2 段的更正。上面那条 Verify 已跑绿，与许可证无关。
 - [ ] **T2 (P1, human: ~2d / CC: ~2h)** — `src/adapter/` — `ProbeSurface` 实现：`probe` / `sample` / `report` / `reset` / 并发池 / 丢包对账 / **吞吐标定**
   - Surfaced by: Issue 1A、Issue 3A、Issue 5A；**v6 把 D7 的能力隔离断言并入本任务**
   - Files: `src/adapter/punchingbag.py`, `src/adapter/probe_pool.py`, `src/adapter/iface.py`
