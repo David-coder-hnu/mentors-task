@@ -36,7 +36,7 @@
 
 **Effort:** L
 **Priority:** P3
-**Depends on:** Stage 1 的 `ProbeSurface` 适配器完成（T2/T10）
+**Depends on:** Stage 2 的依赖，**不是 Stage 1 的**（2026-10-03 `/plan-eng-review` v6 更正）。原行写「Stage 1 的 `ProbeSurface` 适配器完成（T2/T10）」，**方向对但落点错**：本条要接的是**八行表**，而八行表归 Stage 2；`ProbeSurface` 只是这条路上的一个中间件，做完它这些 TGA 一个都跑不起来。真实前置是三条——**`T6b`**（B2/B3 落地，给对比带补上同构的实现基线）、**`T15`**（`RouterShim`，没有它 Stage 2 的真值是空的）、以及**6Sense 的独立轨道**（`T7`，它是这条「同行评审算法对比带」现有的唯一成员）。**换句话说：这条任务的触发时点是「Stage 2 的表已经在跑」，不是「接口写完了」。**
 
 ---
 
