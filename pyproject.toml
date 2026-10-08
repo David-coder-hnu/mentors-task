@@ -1,0 +1,15 @@
+[project]
+name = "mentors-task"
+version = "0.0.0"
+description = "Agent 驱动的 IPv6 主动探测 —— 可控靶场上的可回放对比实验"
+requires-python = ">=3.12"
+
+[tool.pytest.ini_options]
+# 让 `from src.adapter... import` 在仓库根直接可用，不必安装成包。
+pythonpath = ["."]
+testpaths = ["tests"]
+# T17 的范围决定（设计方案 :1290）：单测进 hosted CI，需要 netns/Docker 的
+# 集成测试用 marker 排除。这里把 marker 声明出来，免得 pytest 报 unknown marker。
+markers = [
+    "integration: 需要 Docker / netns / 原始套接字的测试；hosted CI 里排除",
+]

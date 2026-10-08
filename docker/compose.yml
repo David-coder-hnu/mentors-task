@@ -49,6 +49,18 @@ services:
       - NET_RAW
     volumes:
       - ./smoke/punchingbag-smoke.json:/config/smoke.json:ro
+      # ── T2(b)：靶场的两个日志汇点必须能被**宿主**读到 ────────────────────
+      # 为什么非要宿主导出：`packet_log.txt` **只在正常退出时 flush**
+      # （`punchingbag.cpp:386`），所以吞吐标定的每一档必须走
+      # `起靶场 → 跑探测 → **停靶场** → 读账本`，而「停靶场」与「读文件」
+      # 这两步只能由宿主做（容器 `--rm` 之后里面的文件就没了）。
+      # 若在靶场还活着的时候去读，**读到的是被截断的 `packet_log`**，
+      # 于是第一层丢包（pcap 缓冲区溢出）会被**假报**成一大片。
+      #
+      # 靶场在自己的 CWD 里创建这两个文件（`:56`），所以挂 CWD 即可，
+      # 不需要知道它用了什么文件名——文件名变了这里照样工作。
+      - ./run/target-logs:/logs
+    working_dir: /logs
     networks:
       pbnet:
         ipv6_address: 2001:db8:1::2
@@ -58,6 +70,7 @@ services:
       - --thread-count=2
 
   prober:
+    # T1 的冒烟装置：用系统 `ping` 证明靶场按 config 起效。它**不测 Python**。
     image: punchingbag:smoke
     cap_add:
       - NET_ADMIN
@@ -86,6 +99,53 @@ services:
           exit 1
         fi
         echo "OK: 负对照无回包，符合预期"
+
+  # ── T2：`src/` 的集成测试跑在这里 ──────────────────────────────────────────
+  #
+  #   cd docker
+  #   docker compose --profile harness run --rm harness
+  #
+  # `run` 会连带起 `target`（depends_on），但**不会**起 `prober`——
+  # 所以冒烟和实弹两条路互不干扰。
+  #
+  # 为什么 profiled：不这样，`docker compose up` 会把 harness 一起拉起来，
+  # 而 T1 的验收命令是 `--abort-on-container-exit --exit-code-from prober`，
+  # 多一个容器就换了语义。profile 让它只在显式点名时出现。
+  #
+  # 源码是 **bind mount 进来的**（不是 COPY 进镜像）：改代码不用重建镜像。
+  # `:ro` 是刻意的——测试不该写回工作树；pytest 的缓存写到容器内 tmp。
+  harness:
+    profiles: ["harness"]
+    build:
+      context: .
+      dockerfile: harness.Dockerfile
+    image: mentors-task-harness:dev
+    cap_add:
+      - NET_RAW
+      - NET_ADMIN
+    # 探测前缀的路由（`ip -6 route add …`）要改内核路由表，所以也要 NET_ADMIN。
+    networks:
+      pbnet:
+        ipv6_address: 2001:db8:1::4
+    depends_on:
+      - target
+    volumes:
+      - ..:/w:ro
+    working_dir: /w
+    environment:
+      # 别让 pytest 试图往只读的 /w 写缓存。
+      PYTHONDONTWRITEBYTECODE: "1"
+    # 解释器写在 command 里而不是用 ENTRYPOINT：这个镜像同时要能跑
+    # `docker compose run --rm harness python -c '…'` 这类临时排查，
+    # 钉死 ENTRYPOINT 会让每次都得加 `--entrypoint`。
+    command:
+      - python
+      - -m
+      - pytest
+      - tests/integration
+      - -v
+      - -p
+      - no:cacheprovider
 
 networks:
   pbnet:

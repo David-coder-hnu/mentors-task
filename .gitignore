@@ -5,3 +5,20 @@ desktop.ini
 ~$*
 *.tmp
 *.bak
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# 靶场产物：Punching Bag 每次运行都会在 CWD 落一个 queue_log_*.txt
+# （上游 README「Logging」段）。它是**运行时证据**，不是源码，
+# 但 T2 的吞吐标定（docs/perf_baseline.md）要读它——所以别让它在仓库根堆积。
+queue_log_*.txt
+
+# 靶场的日志汇点：compose 把 `docker/run/target-logs` 挂成靶场的 CWD
+# （T2(b) 的标定要逐档读它）。里面是 packet_log.txt 这类**每次运行重新生成**
+# 的东西——一轮 20000 探测就是 3 MB 的文本，进版本库只会把仓库撑肿，
+# 而它提供的证据已经落到 docs/perf_baseline.md 的表里了。
+docker/run/
