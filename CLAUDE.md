@@ -6,15 +6,17 @@
 
 ## 文件
 
+> **文档布局**（2026-10-08 收拢）：仓库根只留**活文档**（设计文档、`CLAUDE.md`、`TODOS.md`），其余全部归入 `docs/`。**先读 [`docs/README.md`](docs/README.md)** —— 它按权威性给每个文件定位，并说明冲突时以谁为准。
+
 | 文件 | 说明 |
 |---|---|
-| `IPv6_Agent_Probing_Research_Report.pdf` | 自己写的调研报告（2026-09），含 6Gen→TNet 的相关工作演进与建议架构 |
-| `IPv6_Agent_Probing_Research_Report.md` | 上述报告的 markdown 转写（原文中文，逐页对照页面图像核对） |
-| `6Seeks_A_Global_IPv6_Network_Periphery_Scanning_System.pdf` | IEEE ToN 2025 原文，关键基线论文 |
-| `6Seeks_中文全文.md` | 6Seeks 全文中文译读（含表 I–VI、图 1–16 图说、关键数字速查） |
 | `IPv6_Agent_探测_设计方案.md` | **唯一权威的设计文档（活文档，永远以它为准）**。2026-10-03 由 `/office-hours` 产出，经 3 轮对抗式评审 + **两次** `/plan-eng-review` 四段评审 + `/plan-ceo-review`（含 Outside Voice），**现为 v6**。核心决定：贡献是靶场 + 可回放评分器，Agent 是靶场上的被测对象。**v2**：发现 Punching Bag（IMC 2026）本身就是这类靶场，贡献拆两半。**v4**：P1 由「LLM vs RL」改写为「**开放 vs 封闭动作空间**」；Stage 2 由 fork 包路径改为 **Response 层 shim**；主终点由 `info_gain` 改为**可数量**；Stage 1 降为 Stage 2 的 harness 前置。**v5**：把 CEO review 的 22 条写回逐条落地（Stage 1 降为冒烟表、30 次比较的 Holm–Bonferroni、两个 co-primary 端点的判决规则、P1 的 2×2 杀死矩阵、A3 声明失效、缓存键加 config 哈希）。**v6**：第三次评审（`/plan-eng-review`，2026-10-08）验的是**「要求写了、交付物在不在」**——查出三处脱节并落地：族规模分母写死 **28**（不是 30，A3 已声明失效）+ 三级阶梯 28→30→36、新增 `T18` 交付**留出集**（门 2 条件 3 的原话是「不修就整个实验作废」却无任务交付它）、新增 `T6c` 补 `M1`/`M2` 的**行为定义**（冒烟表主比较的自变量原先只有半句标注）；critical gap 由 4 条涨到 **7 条且全部静默**。含 8 行基线表（B0–B5、A1–A3）、Stage 0–3 拆分、8 条 `Reviewer Concerns`、**T1–T19** 任务清单 |
-| `docs/plans/2026-10-03-ceo-plan.md` | `/plan-ceo-review` 的快照（`status: PROMOTED`）。**不是活文档**——所有判断已落进上面的设计文档。**它的价值在"当时为什么这么改"**：被否决的备选、被撤销的扩张、Outside Voice 16 条里没通过核实的 3 条。**与设计文档冲突时以后者为准**（文件开头有完整说明） |
 | `TODOS.md` | 推迟项清单（2026-10-03 建立）。**当前 5 条**：导师答复补录（P1）、其余 5 个 TGA 基线（P3）、fork 回退预案（P4）、安装 `jq`（P3）、安装 Codex CLI（P3）。原「版权材料隔离」已**关闭**——升级为 Stage 0 交付物（门 0 条件 9） |
+| `docs/README.md` | **文档索引**。`docs/` 下分四层（`restricted/` 版权材料、`reports/` 调研报告、`plans/` 评审快照、`artifacts/` gstack 原始产出），按权威性排列；说明每个文件的用途与冲突裁决顺序 |
+| `docs/restricted/` | **版权材料，仓库必须保持 private**：6Seeks IEEE ToN 2025 原文 + 中文全文译读。将来开源原型代码前必须整目录剥离，由导出脚本断言（门 0 条件 9） |
+| `docs/reports/` | 自己写的调研报告（2026-09）PDF + markdown 转写。**是设计文档的前身**，多处判断已被评审改写，引用前先确认 |
+| `docs/plans/2026-10-03-ceo-plan.md` | `/plan-ceo-review` 的快照（`status: PROMOTED`）。**不是活文档**——所有判断已落进上面的设计文档。**它的价值在"当时为什么这么改"**：被否决的备选、被撤销的扩张、Outside Voice 16 条里没通过核实的 3 条。**与设计文档冲突时以后者为准**（文件开头有完整说明）。注意任务编号是 `CE1–CE21`，与设计文档的 `T1–T19` **不一一对应** |
+| `docs/artifacts/` | gstack 各技能的**原始产出**（office-hours 设计稿、两版测试计划、CEO plan 原版、评审台账 JSONL）。全部是过程记录，不是决策本身。已知缺口见 `docs/README.md` 末段 |
 
 ## 代码（原型）
 
