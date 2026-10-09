@@ -13,6 +13,7 @@ D7 的强制手段是**进程边界**，理由是 `:389`：v5 删掉了「类型
 | `TestEdgeOne` | 服务端→客户端的**字节**里出现了真值字段 |
 | `TestRealProcessBoundary` | 上面两条只在「一个解释器里的两个对象」上成立，而不是真进程 |
 | `TestBudgetIsNotLocal` | 策略改自己那份预算视图就能影响评分（`v6 (d)`） |
+| `TestHandshakeCarriesTheBudget` | 握手送出来的初始预算被**静默丢掉**（T13 写 B0 时撞到） |
 
 > **为什么非得跑真子进程。** `MemoryChannel` 里两边互相都 import 得到——
 > 在那里断言「拿不到真值」，测到的是「我们没写错」，不是「边界在那儿」。
@@ -554,6 +555,54 @@ class TestBudgetIsNotLocal:
     def test_budget_exhausted_is_not_a_probe_run_state(self) -> None:
         """`BudgetExhausted` 不是 `ProbeRun` 的一种状态——它是异常，不是结果。"""
         assert not issubclass(BudgetExhausted, ProbeRun)
+
+
+# ── 握手把预算送到策略手里了吗 ───────────────────────────────────────────────
+
+
+class TestHandshakeCarriesTheBudget:
+    """**T13 的接口发现**：`Reply.budget_left` 送出来了，但没人接。
+
+    写第一个策略（`B0`）时撞到的：`ProbeSurface` 原先只在 `_call()` 里刷新
+    `_budget_left`，而 `_call()` 要等第一次探测。于是 `surface.budget_left` 在
+    发第一个包之前是 `None`——而 B0 恰恰要在发第一个包**之前**决定「每个前缀
+    探几次」。
+
+    这不是「B0 的写法问题」，是接口缺口：**每一个**策略都要在开跑前知道自己
+    有多少预算（B1 要决定采多少点、B4 要决定 bandit 的轮数、A1/A2 要决定
+    epoch 怎么花），绕开的写法会把这个缺口编码进每一个策略。
+
+    两条断言分开测，因为它们会**分别**失效：一条测 `ProbeSurface` 肯不肯收
+    （构造参数），另一条测 `_hello` 肯不肯给（返回值）。只接一半的现场是
+    「预算还是 `None`」，而那时该看哪一半不该靠猜。
+    """
+
+    def test_the_surface_knows_the_budget_before_the_first_probe(self) -> None:
+        surface = ProbeSurface([PREFIX], MemoryChannel().client_side(), budget_left=7)
+        assert surface.budget_left == 7, "构造参数没被接上"
+
+    def test_the_surface_still_defaults_to_unknown(self) -> None:
+        """不给就是 `None` —— **不猜一个默认值**（猜错的两种方向都是静默失败）。"""
+        assert ProbeSurface([PREFIX], MemoryChannel().client_side()).budget_left is None
+
+    def test_hello_returns_the_whole_reply_not_just_its_result(self) -> None:
+        """预算挂在 `Reply.budget_left` 上，**不在 `result` 里**。
+
+        这就是原先丢掉它的原因：`_hello` 返回的是 `reply.result`，而
+        `result` 只有 `protocol` 与 `prefixes` 两个键——预算是**另一个字段**，
+        恰好没被任何测试盯过，所以丢了一年也看不出来。
+        """
+        from src.adapter.strategy_child import _hello
+
+        server = make_server(ledger=BudgetLedger(5))
+        channel = MemoryChannel(on_request=server.handle).client_side()
+        reply = _hello(channel)
+
+        assert reply.result is not None and reply.result["prefixes"] == [PREFIX]
+        assert "budget_left" not in reply.result, (
+            "预算不该藏在 result 里——它是 Reply 的字段，测试要盯的就是这一点"
+        )
+        assert reply.budget_left == 5, "握手没把权威账本的初始值带回来"
 
 
 # ── 接口自身的边界 ──────────────────────────────────────────────────────────

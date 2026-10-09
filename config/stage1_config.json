@@ -1,0 +1,72 @@
+{
+  "_comment": [
+    "Stage 1 冒烟表的配置规格（T13 / D10）。**这份文件就是 Stage 1 的 ground truth**：",
+    "靶场读它的 `subnets` 决定回不回包，harness 读同一份导出 `GroundTruth`。",
+    "",
+    "顶层那些非 `subnets` 的键是**我们自己的**，靶场忽略它们——T1 的冒烟 config",
+    "（docker/smoke/punchingbag-smoke.json）就带了 `_comment` 而靶场照跑 5/5，",
+    "所以「多加顶层键安全」是实测过的，不是推断。同理，每个 subnet 里的 `_role`",
+    "也是我们的标注，靶场只读 `ipv6_prefix` 与四个 `*_response_rate`。",
+    "",
+    "**别把这份文件与 docker/smoke/punchingbag-smoke.json 混起来**：那份是 T1 的",
+    "脚手架（两个前缀，只为证明 config 生效），这份是 Stage 1 的实验口径。",
+    "两者的前缀集合不相交，混用会让「探了哪些前缀」与「真值覆盖哪些前缀」分叉。",
+    "",
+    "规格的**推导与自检**在 tests/unit/test_stage1_config.py —— 那里把下面每个数",
+    "都从 `subnets` 现算一遍再断言。所以这份文件里的数不靠散文维持一致，靠测试。"
+  ],
+
+  "W_s": 0.25,
+  "epoch_size": 20,
+  "budget": 300,
+  "api_cost_cap": 0,
+  "wall_clock_cap_s": 1800,
+
+  "model": "claude-opus-5-5",
+  "model_version": "claude-opus-5-5",
+  "temperature": 0.0,
+  "top_p": 1.0,
+  "max_tokens": 1024,
+  "call_date": "2026-10-09",
+
+  "subnets": [
+    {"ipv6_prefix": "2001:db8:5:0::/64",  "_role": "aliased", "default_response_rate": 1.0,  "EUI_response_rate": 1.0, "lower_response_rate": 1.0, "higher_response_rate": 1.0},
+    {"ipv6_prefix": "2001:db8:5:1::/64",  "_role": "aliased", "default_response_rate": 1.0,  "EUI_response_rate": 1.0, "lower_response_rate": 1.0, "higher_response_rate": 1.0},
+    {"ipv6_prefix": "2001:db8:5:2::/64",  "_role": "aliased", "default_response_rate": 1.0,  "EUI_response_rate": 1.0, "lower_response_rate": 1.0, "higher_response_rate": 1.0},
+    {"ipv6_prefix": "2001:db8:5:3::/64",  "_role": "aliased", "default_response_rate": 1.0,  "EUI_response_rate": 1.0, "lower_response_rate": 1.0, "higher_response_rate": 1.0},
+    {"ipv6_prefix": "2001:db8:5:4::/64",  "_role": "aliased", "default_response_rate": 1.0,  "EUI_response_rate": 1.0, "lower_response_rate": 1.0, "higher_response_rate": 1.0},
+    {"ipv6_prefix": "2001:db8:5:5::/64",  "_role": "aliased", "default_response_rate": 1.0,  "EUI_response_rate": 1.0, "lower_response_rate": 1.0, "higher_response_rate": 1.0},
+    {"ipv6_prefix": "2001:db8:5:6::/64",  "_role": "aliased", "default_response_rate": 1.0,  "EUI_response_rate": 1.0, "lower_response_rate": 1.0, "higher_response_rate": 1.0},
+    {"ipv6_prefix": "2001:db8:5:7::/64",  "_role": "aliased", "default_response_rate": 1.0,  "EUI_response_rate": 1.0, "lower_response_rate": 1.0, "higher_response_rate": 1.0},
+
+    {"ipv6_prefix": "2001:db8:5:8::/64",  "_role": "content-mid",  "default_response_rate": 0.3,  "EUI_response_rate": 0.3,  "lower_response_rate": 0.3,  "higher_response_rate": 0.3},
+    {"ipv6_prefix": "2001:db8:5:9::/64",  "_role": "content-mid",  "default_response_rate": 0.3,  "EUI_response_rate": 0.3,  "lower_response_rate": 0.3,  "higher_response_rate": 0.3},
+    {"ipv6_prefix": "2001:db8:5:a::/64",  "_role": "content-mid",  "default_response_rate": 0.3,  "EUI_response_rate": 0.3,  "lower_response_rate": 0.3,  "higher_response_rate": 0.3},
+    {"ipv6_prefix": "2001:db8:5:b::/64",  "_role": "content-mid",  "default_response_rate": 0.3,  "EUI_response_rate": 0.3,  "lower_response_rate": 0.3,  "higher_response_rate": 0.3},
+    {"ipv6_prefix": "2001:db8:5:c::/64",  "_role": "content-mid",  "default_response_rate": 0.3,  "EUI_response_rate": 0.3,  "lower_response_rate": 0.3,  "higher_response_rate": 0.3},
+    {"ipv6_prefix": "2001:db8:5:d::/64",  "_role": "content-mid",  "default_response_rate": 0.3,  "EUI_response_rate": 0.3,  "lower_response_rate": 0.3,  "higher_response_rate": 0.3},
+
+    {"ipv6_prefix": "2001:db8:5:e::/64",  "_role": "content-low",  "default_response_rate": 0.1,  "EUI_response_rate": 0.1,  "lower_response_rate": 0.1,  "higher_response_rate": 0.1},
+    {"ipv6_prefix": "2001:db8:5:f::/64",  "_role": "content-low",  "default_response_rate": 0.1,  "EUI_response_rate": 0.1,  "lower_response_rate": 0.1,  "higher_response_rate": 0.1},
+    {"ipv6_prefix": "2001:db8:5:10::/64", "_role": "content-low",  "default_response_rate": 0.1,  "EUI_response_rate": 0.1,  "lower_response_rate": 0.1,  "higher_response_rate": 0.1},
+    {"ipv6_prefix": "2001:db8:5:11::/64", "_role": "content-low",  "default_response_rate": 0.1,  "EUI_response_rate": 0.1,  "lower_response_rate": 0.1,  "higher_response_rate": 0.1},
+    {"ipv6_prefix": "2001:db8:5:12::/64", "_role": "content-low",  "default_response_rate": 0.1,  "EUI_response_rate": 0.1,  "lower_response_rate": 0.1,  "higher_response_rate": 0.1},
+    {"ipv6_prefix": "2001:db8:5:13::/64", "_role": "content-low",  "default_response_rate": 0.1,  "EUI_response_rate": 0.1,  "lower_response_rate": 0.1,  "higher_response_rate": 0.1},
+
+    {"ipv6_prefix": "2001:db8:5:14::/64", "_role": "content-sparse", "default_response_rate": 0.02, "EUI_response_rate": 0.02, "lower_response_rate": 0.02, "higher_response_rate": 0.02},
+    {"ipv6_prefix": "2001:db8:5:15::/64", "_role": "content-sparse", "default_response_rate": 0.02, "EUI_response_rate": 0.02, "lower_response_rate": 0.02, "higher_response_rate": 0.02},
+    {"ipv6_prefix": "2001:db8:5:16::/64", "_role": "content-sparse", "default_response_rate": 0.02, "EUI_response_rate": 0.02, "lower_response_rate": 0.02, "higher_response_rate": 0.02},
+    {"ipv6_prefix": "2001:db8:5:17::/64", "_role": "content-sparse", "default_response_rate": 0.02, "EUI_response_rate": 0.02, "lower_response_rate": 0.02, "higher_response_rate": 0.02},
+
+    {"ipv6_prefix": "2001:db8:5:18::/64", "_role": "tier-eui-hot",    "default_response_rate": 0.02, "EUI_response_rate": 1.0, "lower_response_rate": 0.02, "higher_response_rate": 0.02},
+    {"ipv6_prefix": "2001:db8:5:19::/64", "_role": "tier-eui-hot",    "default_response_rate": 0.02, "EUI_response_rate": 1.0, "lower_response_rate": 0.02, "higher_response_rate": 0.02},
+    {"ipv6_prefix": "2001:db8:5:1a::/64", "_role": "tier-eui-hot",    "default_response_rate": 0.02, "EUI_response_rate": 1.0, "lower_response_rate": 0.02, "higher_response_rate": 0.02},
+
+    {"ipv6_prefix": "2001:db8:5:1b::/64", "_role": "tier-byte-hot",   "default_response_rate": 0.02, "EUI_response_rate": 0.02, "lower_response_rate": 1.0, "higher_response_rate": 1.0},
+    {"ipv6_prefix": "2001:db8:5:1c::/64", "_role": "tier-byte-hot",   "default_response_rate": 0.02, "EUI_response_rate": 0.02, "lower_response_rate": 1.0, "higher_response_rate": 1.0},
+
+    {"ipv6_prefix": "2001:db8:5:1d::/64", "_role": "silent", "default_response_rate": 0.0, "EUI_response_rate": 0.0, "lower_response_rate": 0.0, "higher_response_rate": 0.0},
+    {"ipv6_prefix": "2001:db8:5:1e::/64", "_role": "silent", "default_response_rate": 0.0, "EUI_response_rate": 0.0, "lower_response_rate": 0.0, "higher_response_rate": 0.0},
+    {"ipv6_prefix": "2001:db8:5:1f::/64", "_role": "silent", "default_response_rate": 0.0, "EUI_response_rate": 0.0, "lower_response_rate": 0.0, "higher_response_rate": 0.0}
+  ]
+}

@@ -40,8 +40,14 @@ DEFAULT_ENTRY_FUNCTION = "run"
 _HELLO_ID = 0
 
 
-def _hello(channel: LineChannel, timeout_hint: str = "") -> dict[str, object]:
-    """握手：拿任务范围与初始预算视图。"""
+def _hello(channel: LineChannel, timeout_hint: str = "") -> Reply:
+    """握手：拿任务范围与初始预算视图。
+
+    **返回整条 `Reply`，不只 `result`。** 初始预算挂在 `Reply.budget_left` 上，
+    而不是 `result` 里——只要 `result`，那份预算是被静默丢掉的，于是策略在
+    第一次探测之前读 `surface.budget_left` 会拿到 `None`（见 `ProbeSurface`
+    `__init__` 里那条接口发现）。这是 T13 写 B0 时撞到的真缺口，不是洁癖。
+    """
     channel.send(
         protocol.request_to_wire(Request(verb="hello", args={}, id=_HELLO_ID))
     )
@@ -60,7 +66,7 @@ def _hello(channel: LineChannel, timeout_hint: str = "") -> dict[str, object]:
             f"协议版本不匹配：runner 说 {reply.result.get('protocol')}，"
             f"本进程是 {protocol.PROTOCOL_VERSION}"
         )
-    return reply.result
+    return reply
 
 
 def load_entry(entry: str) -> Callable[[ProbeSurface], None]:
@@ -91,7 +97,15 @@ def main(argv: list[str] | None = None) -> int:
     try:
         run = load_entry(args.entry)
         bootstrap = _hello(channel)
-        surface = ProbeSurface(list(bootstrap["prefixes"]), channel)  # type: ignore[arg-type]
+        prefixes = bootstrap.result
+        assert isinstance(prefixes, dict)  # _hello 已经查过
+        surface = ProbeSurface(
+            list(prefixes["prefixes"]),  # type: ignore[arg-type]
+            channel,
+            # 把握手带回来的初始预算视图接上——不接的话它在第一次探测前是
+            # `None`，而策略要在发第一个包之前就决定怎么花。见 `_hello`。
+            budget_left=bootstrap.budget_left,
+        )
         run(surface)
         return 0
     except SurfaceError as exc:

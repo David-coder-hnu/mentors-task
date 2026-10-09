@@ -83,9 +83,31 @@ class ProbeSurface:
             `probe()` / `sample()` 做归属检查，防止策略探到任务范围之外去。
         channel: 通往 runner 的 stdio 通道。**已经 `hello` 过**——握手由
             `strategy_child` 负责，因为那是「子进程启动」的事，不是接口的事。
+        budget_left: 握手回复里带回来的**初始预算视图**。**必须由
+            `strategy_child` 传进来，不能省**——见下面那条。
     """
 
-    def __init__(self, prefixes: Sequence[str], channel: LineChannel) -> None:
+    # ── 为什么 `budget_left` 是个构造参数（T13 的接口发现）──────────────────
+    #
+    # 握手的回复里本来就带 `budget_left`（`protocol.Reply` 的字段，由
+    # `SurfaceServer.handle` 填），但 `ProbeSurface` 原先只在 `_call()` 里更新
+    # 它，而 `_call()` 要等第一次探测才发生。于是**第一个策略（B0）发现自己
+    # 拿不到预算**：`surface.budget_left is None`，而它要在发第一个包之前就决定
+    # 「每个前缀探几次」。
+    #
+    # 绕开的写法是有的（先探一次再读 `budget_left`，反推出总量），但那等于把
+    # 一个接口缺口编码进每一个策略里，而真正该知道这件事的地方是握手。
+    # `v6 (d)` 已经把权威账本放在 runner 侧；这里只是把**它已经送出来的那份
+    # 视图**接上，没有新增任何真值通路。所有后续策略（B1/B4/B5/M1/M2/A1/A2）
+    # 都要在开跑前知道自己有多少预算，所以在第一个策略这里修掉最便宜。
+
+    def __init__(
+        self,
+        prefixes: Sequence[str],
+        channel: LineChannel,
+        *,
+        budget_left: int | None = None,
+    ) -> None:
         if not prefixes:
             raise ValueError("prefixes 不能为空——没有任务范围就不是一次实验")
         self._networks = tuple(ipaddress.ip_network(p, strict=False) for p in prefixes)
@@ -93,7 +115,7 @@ class ProbeSurface:
         self.prefixes: tuple[str, ...] = tuple(dict.fromkeys(prefixes))
         self._channel = channel
         self._next_id = 0
-        self._budget_left: int | None = None
+        self._budget_left: int | None = budget_left
 
     # ── 探测 ────────────────────────────────────────────────────────────
 
@@ -148,6 +170,9 @@ class ProbeSurface:
     @property
     def budget_left(self) -> int | None:
         """预算视图的**本地副本**，随回复刷新；未握手前是 `None`。
+
+        握手之后就是**已知**的（构造参数带进来的那份），所以策略在发第一个
+        包之前就能读到它——见 `__init__` 的 `budget_left` 参数。
 
         它是**视图不是账本**：改它不影响任何东西，因为权威账本在 runner 侧
         （`v6 (d)`，`:397`）。做成只读属性而不是可写字段，是为了让
