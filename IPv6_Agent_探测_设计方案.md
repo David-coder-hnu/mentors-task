@@ -398,7 +398,7 @@ class Oracle:                          # ← 只给 score() 和 runner 用
 
 > **v5 删除了原先的退路。** 原文写「优先用进程边界…**退而求其次**用类型边界 + 运行时断言（`assert not hasattr(surface, "ground_truth")`）」。**这条退路必须删掉**，因为紧接着的那句话正是它不成立的理由：**「A2 能写代码」使这一条从卫生问题升级为效度问题**。一段生成的代码绕过一句 `hasattr` 是平凡的，而 **A2 的全部卖点就是它写代码**。留着「退而求其次」，等于给最坏情况准备了一个已知无效的方案。
 >
-> **并补 A2 的代码执行沙箱（一等交付物，不是附属条款）**：进程边界防的是「顺手读到」，沙箱防的是「刻意去找」，两者的失效方式不同，**都要有测试**。沙箱需显式规定并各自带测试：**读路径白名单**、**导入白名单**、**禁止 `subprocess`**、**禁止直接网络访问**（措辞见下 (d)）、**禁止读决策缓存**（读缓存 = 读别人的答案）。
+> **并补 A2 的代码执行沙箱（一等交付物，不是附属条款）**：进程边界防的是「顺手读到」，沙箱防的是「刻意去找」，两者的失效方式不同，**都要有测试**。沙箱需显式规定并各自带测试：**读路径白名单**、**导入白名单**、**禁止 `subprocess`**、**禁止直接网络访问**（措辞见下 (d)）、**禁止读决策缓存**（读缓存 = 读别人的答案）。**v8 更正（T10 落地后）：第一项落成了「受保护根黑名单」，不是白名单**——审计这一层上白名单会把解释器自己饿死（实测）；第五项**只落了一半**（缓存今天没有规范路径）。两点见文末 T10 完成块第三、九节。
 >
 > **v6 补三条——进程边界声明了，但它的载荷没规定（架构 #2 / 代码质量 #3）：**
 >
@@ -1195,16 +1195,16 @@ class Oracle:                # runner 侧持有，策略进程拿不到（进程
 | `score()` | **零探测的运行被折成「0 浪费」** | **是**（T4：`test_an_empty_run_is_not_a_zero_ratio`） | **是**（T4：`ScoringError`，**整轮拒答**——`0/0` 退回 `None` 会让它在下游变成 NaN） | **是**（当场炸） |
 | `score()` | **声明的粒度与 config 错位** → 该记的没记 / 记到别人头上 | **是**（T4：refined / off-target 两条） | **是**（T4：按最长前缀匹配归并，并留 `reports_refined` / `reports_off_target` 两列） | **是**（诊断列） |
 | `score()` | **`aliased_caught` 被「把每个前缀都声明成 aliased」打满** | **是**（T4：`TestTheEndpointIsGameable` 2 条） | **否**（**修法未定，归 T14**——见「主端点与胜负判据」段的 v7 注） | **是**（T4 的 `aliased_false_positives` 列让它显示出来；**不是静默**，所以不计入下面的 critical gap） |
-| `ProbeSurface` | **策略越界读到真值字段**（D7） | **是**（T2(c)+T5：`test_isolation.py` **31** 条，进 CI） | **是**（进程边界 + 出边白名单/黑名单） | **是** ← v7 降级：`TruthLeak` 会当场炸，不再等跑完 |
+| `ProbeSurface` | **策略越界读到真值字段**（D7） | **是**（T2(c)+T5+T10：`test_isolation.py` **38** 条，进 CI） | **是**（进程边界 + 出边白名单/黑名单；**v8：文件读取另有一层，见下两行**） | **是** ← v7 降级：`TruthLeak` 会当场炸，不再等跑完 |
 | `state` 组装 | **并发下到达顺序影响 `state` → 缓存永不命中 → 不可复现**（D9） | **是**（T5：`test_canonical.py::TestOrderIndependence` 6 条 + `TestListIsRejected` 4 条；`test_decide.py::TestStateIsOrderIndependent` **12** 条） | **是**（T5：`canonical()` 的类型白名单**当场拒掉 `list`** —— 顺序有没有语义必须被显式选定；`Stage1State` 的每个字段都按构造序无关） | **是** ← v7 闭合：`list` / 墙钟 / `nan` 一进 `state` 就抛 `CanonicalError` |
 | `RouterShim` | 合成响应与 `GroundTruth.routers` 不一致 | 否 → **补契约测试** | 否 | 否 |
 | `cache.key()` | **内建 `hash()` 按进程加盐 → 跨进程永不命中**（v6 / V6-6） | **是**（T5：`TestCrossProcessStability` / `TestCrossProcessKeyStability` 各 3 条，进 CI 归 T17） | **是**（T5：`canonical.digest()` 只走 `hashlib.sha256`，并把缓存文件的**指纹**一并编进去） | **是** ← v7 闭合：见下方「副作用」，加盐会让**每一份已发布的缓存都拒绝加载** |
 | 预算台账 | **策略侧自记账**（v6 / V6-8）→ 超预算不被发现 | 否 → **补**（runner 侧权威计数） | 否 → **补拒绝分支** | 否（静默） |
-| 策略进程 | **读 `config/`**（v6 / T10）→ 直接拿到真值 | 否 → **补**（黑名单 + 单测） | 否 → **补沙箱** | **否（静默）** ← **critical gap** |
+| 策略进程 | **读 `config/`**（v6 / T10）→ 直接拿到真值 | **是**（T10：`test_sandbox.py` **76** 条 + `test_isolation.py::TestTheSandboxIsOnTheRealChild` **4** 条，真子进程真去读，**读到就红**） | **是**（T10：审计钩子按受保护根拒读；抛的 `SandboxViolation` **不继承 `OSError`**，所以 `except OSError` 吞不掉） | **是** ← v8 闭合：子进程当场炸成非零退出码，runner 侧看得见 |
 | 探测池 | **池大小无默认值却被漏传**（v6 / V6-9）→ 队列满丢包 → 伪装超时 | **是**（T2：`test_probe_pool.py::TestMandatoryPoolSize` 4 条） | **是**（T2：必填无默认值 → 漏传是 `TypeError`） | **是** ← v7 降级：漏传当场炸，不再静默 |
 | `probe_pool` | **套接字接收队列尾丢弃**（v7 / T2(b)）→ 回包**静默**丢失，**靶场三层对账看不见** | **是**（T2(b)：`test_probe_pool.py::TestDrainDuringFill` 3 条） | **部分**（`drain_every_sends` 缓解；**没有任何断言把池大小钉在无丢包上界之下**） | **是**（`perf_sweep` 表里的「回包路径丢」列）← **但不自动**：要人去读表 |
 
-**七条 critical gap**（无测试 + 无错误处理 + 静默）：~~丢包伪装超时~~、~~缓存键漏版本~~、~~策略越界读真值~~、~~到达顺序污染缓存键~~、~~跨进程哈希加盐~~、**策略进程读 config**、~~池大小漏传~~。
+**七条 critical gap**（无测试 + 无错误处理 + 静默）：~~丢包伪装超时~~、~~缓存键漏版本~~、~~策略越界读真值~~、~~到达顺序污染缓存键~~、~~跨进程哈希加盐~~、~~策略进程读 config~~、~~池大小漏传~~ —— **v8（2026-10-09，T10 落地后）七条全闭**；最后一条的「凭什么」以及它**没有**覆盖到的那部分，见文末 T10 完成块第九节。
 
 > **⚠️ v7 复算（2026-10-09，清点 T5 之后）：七条里闭合六条，还开着一条。** 划线的是闭合的；
 > 唯一还开着的**策略进程读 `config/`** 归 **T10**（A2 的沙箱与允许清单）。四条里的三条是同一条
@@ -1218,7 +1218,7 @@ class Oracle:                # runner 侧持有，策略进程拿不到（进程
 > |---|---|---|
 > | 丢包伪装超时 | T2 | `RangeLedger.reconcile()` 任一层丢失非零抛 `RoundInvalid` |
 > | 池大小漏传 | T2 | `ProbePool` 必填无默认值 → 漏传是 `TypeError`；`test_probe_pool.py::TestMandatoryPoolSize` 4 条 |
-> | 策略越界读真值 | T2(c) | 进程边界 + 出边白名单/黑名单；`test_isolation.py` 现 **31** 条，进 CI |
+> | 策略越界读真值 | T2(c) | 进程边界 + 出边白名单/黑名单；`test_isolation.py` 现 **38** 条（T10 加 4），进 CI |
 >
 > **所以当时还开着的是这四条——三条归 T5，一条归 T10：**
 > - **缓存键漏版本** → **T5**（4A）✅ **T5 已闭合**（2026-10-09，内容哈希入键）
@@ -1226,7 +1226,7 @@ class Oracle:                # runner 侧持有，策略进程拿不到（进程
 > - **跨进程哈希加盐** → **T5**（V6-6）✅ **T5 已闭合**（`digest()` 只用 `hashlib`，且失败变响）
 > - 策略进程读 `config/` → T10 ← **唯一还开着的**
 >
-> **这个分布本身就是一条排期结论**：T5 不是「Agent 那条线的下一步」，它是**当时静默失败面上最大的一块**——四条里占了三条，而 T11/T13/T14 一条都不含。**判据 5 的覆盖图（`0/21`）过期只是记账问题，这一条的后果是排期问题。**（覆盖图仍过期，归 T8；`test_isolation.py` 的条数已同批更正——**数字从表里读得到，不该靠记**。）
+> **这个分布本身就是一条排期结论**：T5 不是「Agent 那条线的下一步」，它是**当时静默失败面上最大的一块**——四条里占了三条，而 T11/T13/T14 一条都不含。**判据 5 的覆盖图（`0/21`）过期只是记账问题，这一条的后果是排期问题。**（覆盖图仍过期，归 T8；`test_isolation.py` 的条数已同批更正——**数字从表里读得到，不该靠记**。**v8：该文件现 38 条**，上表两处同批更正。）
 >
 > **第八条（套接字接收队列尾丢弃）另计**：它与这七条的形状不同（成因一半在我们自己的循环里），**仍然开着**，执行化落在 `TODOS.md` 的 P2 → T13。
 
@@ -1371,7 +1371,7 @@ class Oracle:                # runner 侧持有，策略进程拿不到（进程
       >
       > 所以判据改为**四层**：靶场三层 **+ `sent - received`**。最后一项是这个脚本里唯一能看见第四层的式子。**它是一条经验判据**：成立的前提是靶场配成 rate 1.0（对每个地址都回），于是「实收 < 已发」只可能是丢了。**rate < 1.0 时必须重判**——那种配置下靶场只对确定性子集回包，正确的式子是「预期回包数 − 实收数」。已落进 `scripts/perf_sweep.read_range_ledger()`，并把靶场自评与四层判决**分列**输出（`range_clean` / `clean`），免得读者又把前者当成后者。
     - **(c) 能力隔离断言并入本任务**（原 T10 的核心项）：`ProbeSurface` 与 `Oracle` 必须**进程边界分离**，断言策略进程无法构造 `GroundTruth`。**D7 段已删除类型边界退路**（「A2 能写代码」使 `hasattr` 断言平凡可绕），所以进程边界是唯一形式。**剩下的沙箱与 CI 归 T10。**
-      > **v7：已完成（2026-10-08）。** 落地处见上方「T2(c) 已完成」。**它交付的是边界，不是沙箱**——沙箱（读路径白名单、导入白名单、禁 `subprocess`、禁直接网络访问、禁读决策缓存）仍是 T10 的 (a) 项，**一项都没做**。两者的分工按 D7 段 `:391` 的原话：**进程边界防「顺手读到」，沙箱防「刻意去找」**。T2(c) 只堵了前者，而且堵法是「让这条边上没有真值可顺手读」。
+      > **v7：已完成（2026-10-08）。** 落地处见上方「T2(c) 已完成」。**它交付的是边界，不是沙箱**——沙箱（读路径白名单、导入白名单、禁 `subprocess`、禁直接网络访问、禁读决策缓存）仍是 T10 的 (a) 项，~~**一项都没做**~~　**v8（2026-10-09）：T10 已落地**——清单里四项按原样、第一项落成了受保护根黑名单、第五项只落了一半（缓存没有规范路径）。见文末 T10 完成块第三、九节。两者的分工按 D7 段 `:391` 的原话：**进程边界防「顺手读到」，沙箱防「刻意去找」**。T2(c) 只堵了前者，而且堵法是「让这条边上没有真值可顺手读」。
       >
       > **T10 的剩余项因此可以更准确地描述**：它不再需要「把 `ProbeSurface` 拆出进程」（已拆），而是要在**已经分开的那个子进程**上加约束。特别是 `config/` 读路径黑名单——它防的正是 T2(c) 明确**没**防的那件事（`config/stage1_config.json` 就是 Stage 1 的真值，而它躺在磁盘上，进程边界管不着它）。**两条加起来才闭环，少了任何一条都不成立。**
 - [x] **T3 (P1, human: ~4h / CC: ~30min)** — `src/adapter/ground_truth.py` — config → `GroundTruth` 导出
@@ -1472,16 +1472,16 @@ class Oracle:                # runner 侧持有，策略进程拿不到（进程
 
 ### Outside Voice 采纳后新增的任务（v4）
 
-- [ ] **T10 (P1, human: ~4h / CC: ~30min)** — `src/adapter/sandbox.py` — **A2 的执行沙箱 + 隔离的 CI 断言**
+- [x] **T10 (P1, human: ~4h / CC: ~30min)** — `src/adapter/sandbox.py` — **A2 的执行沙箱 + 隔离的 CI 断言** ✅ **完成于 2026-10-09**（完成块在文末）
   - Surfaced by: 评审 D7 — outside voice #6（策略与真值同对象，A2 会写代码）
-  - Files: `src/adapter/sandbox.py`, `tests/test_isolation.py`, `tests/test_sandbox.py`
-  - Verify: **禁止 `subprocess`**、**禁止直接网络访问**、**禁止读决策缓存**、**禁止读 `config/`**；用子进程边界时，断言策略进程无法构造 `GroundTruth`
+  - Files: `src/adapter/sandbox.py`, `tests/unit/test_isolation.py`, `tests/unit/test_sandbox.py`（**两个测试文件都在 `tests/unit/` 下**，按下面 v7 第 3 条的路径更正；`test_sandbox.py` 落在那里，不是 `tests/` 根——见文末完成块第一节）
+  - Verify: **禁止 `subprocess`**、**禁止直接网络访问**、**禁止读决策缓存**、**禁止读 `config/`**；用子进程边界时，断言策略进程无法构造 `GroundTruth`　**v8：前四条全部落地**（第四条另加 v6 追加的那条单测），**第五条被操作化**——断的不是「手上没有」，是「**产出值的那条路被堵死了**」：`stage1_truth_from_config("config/stage1_config.json")` 死在**读**上。逐条落点见文末完成块第二、七节。
   - **v6：任务缩窄了——接口拆分与进程边界断言已并入 T2。** 本任务现在只剩两部分：**(a) A2 的执行沙箱**（一等交付物，见「能力隔离」段），**(b) `tests/test_isolation.py` 进 CI**。这样拆的理由：**T2 就在写 `src/adapter/`，而隔离是接口的固有属性**——把它挂在 T10 意味着接口先落地、隔离后补，**中间那段时间里两次实验都可能跑在同一个进程里**，而那是「整组实验作废」级别的失误。**隔离跟接口同一条提交。** 沙箱是另一件事（A2 专用，只有它会执行生成的代码），留在 T10。
   - **配置黑名单（v6）**：`config/` 必须在读路径黑名单上——**它是真值的一方**（Punching Bag 的 JSON config 就是 `GroundTruth` 的来源，见 T3）。Verify 追加一条单测：**子进程读 `config/` 必须失败**。
   - **v7 追加（2026-10-09，由 T5 递过来三件）**：
     1. **🔴 一条此前没有任何落点的接口约束**：数据流图把**决策缓存画在 runner 进程里**，而同一张图的第 ③ 条边与 `## 约束` 段的沙箱规则都写着「策略进程不得读决策缓存文件本身」。**两处合起来的意思是 `DecisionCache` 是能力、不是许可**——T5 交付了能力（`src/agent/cache.py`），**许可与路径归 T10**。若要走 stdio 搬查询，得动 `protocol.CLIENT_VERBS`（白名单，加动词必须同步 `PROTOCOL_VERSION`），那是 T2 的协议面。**T5 之前这条约束在文档里一个落点都没有**，现在写在 `cache.DecisionCache` 的 docstring 与 `src/agent/__init__.py` 的模块 docstring 里。
-    2. **`src/agent/` 也进 D7 的导入图断言**：`surface` 干净不代表 `agent` 干净——两者是策略进程里两条独立的导入路径。T5 在 `tests/unit/test_isolation.py` 新增 `TestAgentImportGraph` 三条：`src.agent` 不得拖进真值/runner 侧、不得拖进**整个 `src.scoring`**（前缀匹配，不是列名字）、**不得拖进任何网络客户端**（`socket` / `ssl` / `http.client` / `urllib.request`；最后一条防的是"顺手 `import requests` 兜个底"，那会让**回放**在一份不完整的缓存上悄悄联网）。**本任务 Verify 里那几条黑名单，往 `src/agent/` 上加时照抄这个形状。**
-    3. **路径更正**：上面 Files 写的 `tests/test_isolation.py` 实际在 **`tests/unit/test_isolation.py`**（`pyproject.toml` 的 `testpaths = ["tests"]`，单测进 hosted CI、集成测试用 marker 排除）。该文件现 **31** 条。
+    2. **`src/agent/` 也进 D7 的导入图断言**：`surface` 干净不代表 `agent` 干净——两者是策略进程里两条独立的导入路径。T5 在 `tests/unit/test_isolation.py` 新增 `TestAgentImportGraph` 三条：`src.agent` 不得拖进真值/runner 侧、不得拖进**整个 `src.scoring`**（前缀匹配，不是列名字）、**不得拖进任何网络客户端**（`socket` / `ssl` / `http.client` / `urllib.request`；最后一条防的是"顺手 `import requests` 兜个底"，那会让**回放**在一份不完整的缓存上悄悄联网）。**本任务 Verify 里那几条黑名单，往 `src/agent/` 上加时照抄这个形状。**　**v8：T10 照抄了，并往同一张 `FORBIDDEN` 表里补了一条 `src.adapter.ground_truth`**——它是**把 `config/` 变成真值的那一步**，而且它自己的导入图是干净的（只读文件），所以「导入图干净」与「拿不到答案」在这里**不是同一件事**。见文末完成块第七节。
+    3. **路径更正**：上面 Files 写的 `tests/test_isolation.py` 实际在 **`tests/unit/test_isolation.py`**（`pyproject.toml` 的 `testpaths = ["tests"]`，单测进 hosted CI、集成测试用 marker 排除）。该文件现 **38** 条（T10 又加 4 条：`TestTheSandboxIsOnTheRealChild`）。
 - [ ] **T11 (P1, human: ~1d / CC: ~1h)** — `src/scoring/stats.py` — **配对检验 + 多重性校正 + 分布报告**
   - Surfaced by: 评审 D8 — outside voice #8（CI 不重叠 ≈ p<0.005，制造假阴性；浪费同 seed 配对）
   - Files: `src/scoring/stats.py`, `src/scoring/report.py`
@@ -1527,7 +1527,7 @@ class Oracle:                # runner 侧持有，策略进程拿不到（进程
   - Files: `.github/workflows/test.yml`, `pyproject.toml`（或 `pytest.ini`）
   - Verify: **四条不可失败项必须全绿**，缺一条就是 CI 没起作用：
     1. **能力隔离**（D7 / T2(c)）——策略进程无法构造 `GroundTruth`
-       > **v7：这一条已经有落点了（2026-10-08）**：`tests/unit/test_isolation.py`，22 条，**全部是纯单测**（唯一的外部依赖是一个 `sys.executable` 子进程和 `tmp_path`），所以它**天然符合 T17「集成测试排除在外」的范围**——不需要 marker，跑 `pytest tests/` 就会带上它。`test_isolation.py::TestImportGraph` 与 `TestRealProcessBoundary` 是本条的主要内容。
+       > **v7：这一条已经有落点了（2026-10-08）**：`tests/unit/test_isolation.py`，**38** 条（v8 后），**全部是纯单测**（唯一的外部依赖是一个 `sys.executable` 子进程和 `tmp_path`），所以它**天然符合 T17「集成测试排除在外」的范围**——不需要 marker，跑 `pytest tests/` 就会带上它。`test_isolation.py::TestImportGraph` 与 `TestRealProcessBoundary` 是本条的主要内容。
     2. **`RouterShim` 契约**（D9 / T15）——合成 `src` 集合 == `GroundTruth.routers`
     3. **缓存键跨 `PYTHONHASHSEED` 稳定**（T5(b)）——两个 seed 值下键相等
     4. **日志侧包集合逐次相等**（判据 6(i)）——同一 config + 同 seed 两次 run 的包集合精确相等
@@ -1549,7 +1549,7 @@ _无。_ v3 的五条 finding 全部落成 T2/T5；Outside Voice 的实质缺陷
 
 ## 测试计划产物（供 `/qa` 消费）
 
-- **受影响入口**：`src/adapter/surface.py::probe/sample/report/reset`、`src/adapter/oracle.py::ground_truth/reset_target`、`src/adapter/sandbox.py`（A2 沙箱，T10）、`src/agent/decide.py::decide`、`src/scoring/score.py::score`、`src/scoring/endpoints.py`、`src/scoring/stats.py`
+- **受影响入口**：`src/adapter/surface.py::probe/sample/report/reset`、`src/adapter/oracle.py::ground_truth/reset_target`、`src/adapter/sandbox.py`（沙箱，T10；**v8：已无条件装在每个策略进程的启动路径上，不只在 A2**）、`src/agent/decide.py::decide`、`src/scoring/score.py::score`、`src/scoring/endpoints.py`、`src/scoring/stats.py`
 - **关键交互**：`probe()` → 并发池 → 回包匹配 → `Response`；`decide()` → 缓存查询 → LLM → schema 校验 → 动作；`state` 规范化 → 缓存键 → 命中/未命中；`report()` → 声明通道 → `aliased_caught`
 - **边界情况**：靶场丢包（实收<已发）、迟到回包、无 `CAP_NET_RAW`、LLM 畸形输出、`rate==0` vs 未配置前缀、全 aliased 拓扑、**策略侧试图读取真值字段（D7）**、**并发下 `state` 到达顺序扰动（D9）**、**B0 拿到接近最优分（退化警报，D10）**、**策略进程试图读 `config/`（v6 / T10）**、**池大小漏传（v6 / V6-9）**、**缓存键跨进程不一致（v6 / V6-6）**、**留出集与调参集相交（v6 / T18）**
 - **关键路径**：一次 **Stage 1 冒烟运行**（**5 策略** × 300 探 × 30 seeds）能跑完、能对账、能产出**带配对检验结果与每 seed 分布**的表
@@ -1610,7 +1610,7 @@ NO UNRESOLVED DECISIONS
 
 1. **框架的缓存语义与我们要的缓存契约不是一回事。** `set_llm_cache` 缓的是「同样输入 → 同样输出」；本项目的缓存契约是**随包发布、跨进程可复现，且键里含 prompt 内容、工具池、config 版本**。换掉 `src/agent/cache.py`，等于把已经用单测验过的四个 bug 重新引进来——尤其「内建 `hash()` 按进程加盐（PEP 456）⇒ 跨进程永不命中」那一条，而且这次它在框架内部，不再有测试覆盖。
 2. **LangGraph 的 checkpointer 会在上一层再造一个未规范化的 state 层。** T5 修掉的第二个 bug（并发下 `state` 依赖回复到达顺序）会**原样重现**，只是规范化逻辑落进框架内部，`src/agent/canonical.py` 管不到。任何「框架替我们管状态」的方案，都得先回答这层状态怎么规范化，而它不归我们写。
-3. **它把「策略进程碰不到网络」从 import 图的**性质**降级成**约定**。** 现在这条是可断言的：D7 用 import 图断言策略侧看不到真值字段，`tests/unit/test_isolation.py` 把它做成红灯测试。引入框架后，网络能力藏在框架运行时里，断言从「静态可见」变成「运行时希望它别用」——而**两条硬约束的第一条就是靠这种静态断言守住的**，不能换成约定。
+3. **它把「策略进程碰不到网络」从 import 图的**性质**降级成**约定**。** 现在这条是可断言的：D7 用 import 图断言策略侧看不到真值字段，`tests/unit/test_isolation.py` 把它做成红灯测试。引入框架后，网络能力藏在框架运行时里，断言从「静态可见」变成「运行时希望它别用」——而**两条硬约束的第一条就是靠这种静态断言守住的**，不能换成约定。**v8 补**：T10 的沙箱**确实**把「策略进程不联网」做成了运行时可拒（审计钩子对 `socket.*` / `subprocess.*` 直接抛），所以这一条比 2026-10-08 时更硬——但它挡的是**策略进程自己去联网**；「框架运行时里有 socket」仍只由上面那条静态断言管，本段结论不变。
 4. **`@tool` + AgentExecutor 字面上就是「固定工具池」。** 本文档 `:657`：「**A1 vs A2 的差别就是 P1 的全部内容**」——A1 是封闭工具池，A2 允许构造新原语，两者之差就是「开放动作空间」这个卖点成不成立。用 AgentExecutor 搭 Agent，等于**把 A1 那一格写进了框架选型**，再想让 A2 成立就得跟框架的抽象对着干。
 
 **许可证不在此列。** LangChain / LangGraph 是 **MIT**，与本项目对 Punching Bag 的 AGPL 顾虑（见 `## Constraints`）完全无关。否决它的是**语义与断言强度**，不是授权条款——写清楚这点，免得以后有人以为换个宽松许可证的框架就行了。
@@ -1659,7 +1659,7 @@ NO UNRESOLVED DECISIONS
 | `src/baselines/b0_probe_all.py` | **B0「全探一遍」**（D10 的退化警报） |
 | `tests/unit/test_stage1_config.py` | **30 条** —— 复算规格、复算 B5 可分辨性、复算挂钟 |
 | `tests/unit/test_b0.py` | **14 条** —— 分配 + **真的跑一遍**（T13 的 Verify） |
-| `tests/unit/test_isolation.py` | **+3 条** → 34 条（`TestHandshakeCarriesTheBudget`） |
+| `tests/unit/test_isolation.py` | **+3 条** → 34 条（`TestHandshakeCarriesTheBudget`；**v8 后 38 条**，T10 又加 4） |
 | `src/adapter/surface.py`、`strategy_child.py` | 接口修复（第七节） |
 
 ### 二、config 的形状与各组数值
@@ -1780,3 +1780,151 @@ config 的第一个前缀**写作 `2001:db8:5:0::/64`**，而它的规范形式�
 **`docker/compose.yml` 没有动，所以「B0 单独跑一遍」跑的是 harness 全链路（真子进程 + 真 runner + 真 config 当真值 + 真 `score()`），不是真靶场容器。** 理由：真靶场那条路要么改 `compose.yml`（`target` 现在挂的是 `docker/smoke/punchingbag-smoke.json`，且要加 `2001:db8:5::/48` 的路由），要么新起一个 profile —— **两者都动 T1 的验收装置，而 `compose.yml` 不在 T13 的 `Files` 里**。这条覆盖面已经由 T1 的冒烟测试持有（config 生效、负对照无回包），T13 需要的那一层是「配置规格在**评分口径**下算出什么数」，**那一层不需要真网卡**。
 
 > **需要真靶场的那一步归 T16**（冒烟表实跑）—— 那时才第一次需要「真靶场的速率分布是否与 config 一致」，而它顺带就是 T16 该报的第一件事。
+
+---
+
+## T10 完成块（2026-10-09）—— A2 的执行沙箱 + 子进程级的隔离断言
+
+本块是 T10 的交付记账。任务块在 `:1475`，Verify 在 `:1478`，需求原文在 `:389`–`:405`（D7 / 能力隔离段）。
+写回按仓库的**零位移**规矩：本块整段追加在文末，正文里只做**同行替换**（`git diff -U0` 的每个 hunk 都是 `-N/+N`，行数仍是 1782）。
+
+### 一、交付物
+
+| 交付物 | 状态 | 条数 / 规模 |
+|---|---|---|
+| `src/adapter/sandbox.py` | **新** | 433 行 |
+| `tests/unit/test_sandbox.py` | **新** | **76** 条 |
+| `tests/unit/test_isolation.py` | **改**（`TestTheSandboxIsOnTheRealChild`） | 34 → **38** 条 |
+| `src/adapter/strategy_child.py` | **改** | +20 / −3（`main()` 里一行 `sandbox.install()` 加一段 docstring） |
+
+全量套件：**452 passed, 7 skipped**（沙箱装进每一个策略子进程之后跑的，不是关掉沙箱跑的）。
+
+> **路径更正落地。** 任务块的 `Files` 原写 `tests/test_isolation.py` / `tests/test_sandbox.py`，实际两个文件都在 **`tests/unit/`** 下（`:1484` 的 v7 第 3 条已经更正过前者，本次把后者一并落进 `:1477`）。`pyproject.toml` 的 `testpaths = ["tests"]` 会把两个都收进来，`test_sandbox.py` 不需要 marker——它唯一的"外部依赖"是 `sys.executable` 起的子进程和 `tmp_path`，与 `test_isolation.py` 同一性质，符合 T17「集成测试排除在外」的范围。
+
+### 二、Verify 的逐条落点（`:1478`）
+
+任务块的 Verify 是四条禁止 + 一条断言。逐条对应：
+
+| Verify 原文 | 落点 | 断言长什么样 |
+|---|---|---|
+| **禁止 `subprocess`** | `sandbox.DENIED_MODULES` + `DENIED_EVENTS`（`subprocess.*`） | 真子进程里 `import subprocess` 抛 `SandboxViolation`；同一层的 `multiprocessing` / `pty` / `ctypes` 一起封 |
+| **禁止直接网络访问** | `denied_modules` 的网络原语 + `DENIED_EVENTS` 的 `socket.*` | 真子进程里 `import socket` 抛；**`asyncio` 不封**，理由见第三节（禁的是能力不是写法） |
+| **禁止读决策缓存** | 见第八节——**只落了一半**，且是**具名开着的** | 受保护根机制能封「从受保护根里读」，但缓存今天**没有规范路径**可封；另有 `TestTheCacheIsAnOpenItem` 把这件事钉成会红的断言 |
+| **禁止读 `config/`** | `PROTECTED_SUBDIRS = ("config",)` + `SandboxPolicy.check_open/check_listdir` | 真子进程里四种写法（相对、绝对、`..` 穿越、`bytes`）全部抛；`os.listdir` / `os.scandir` 同封 |
+| **断言策略进程无法构造 `GroundTruth`** | **操作化**了，见第七节 | 断的不是「手上没有」，是「**产出值的那条路被堵死了**」：`stage1_truth_from_config("config/stage1_config.json")` 死在**读**上 |
+
+**v6 追加的那条单测**（`:1480`：「子进程读 `config/` 必须失败」）就是上表第四行，四种子进程里跑**真文件系统**，读到就红。
+
+> **四条禁止里，"禁网络"与 "禁子进程" 是承重的，不是锦上添花。** 它们是通向「审计事件之外」的两扇门：`subprocess` 起一个新解释器（钩子按进程装、不跟随 `exec`），`ctypes` 直接进原生代码（`open(2)` 不经审计事件）。这两条一旦漏，其余全部形同虚设。
+
+### 三、为什么「读路径白名单」落成了「受保护根黑名单」
+
+`:401` 的原文写的是**读路径白名单**。在这一层上它**落不成白名单**，理由是实测出来的、不是取舍：
+
+**解释器自己也用 `open` 读文件。** 导入模块要读 `.py` / `.pyc`，于是每一次 `import` 后面都跟着几个 `open` 事件（`socket.py`、`__pycache__/socket.cpython-312.pyc`……）。默认拒绝一切 `open`，**第一个 `import` 就死，解释器起不来**。
+
+所以审计这一层上能成立的规则是**具名的受保护根黑名单**：默认只有 `config/`（唯一放着答案的目录），`SandboxPolicy.protected_roots` 是它唯一的扩展点。白名单的**正身**是「子进程的文件系统里没有那些文件」，那是另一层（第八节）。
+
+**这一层的边界要写清，否则这个模块会被读成一个比它更强的东西：**
+
+| 挡得住 | 挡不住 |
+|---|---|
+| `open()` 及其所有上层封装（`pathlib`、`json.load`、`os.open`） | **`os.stat`**——CPython **不发这个审计事件**（实测确认）。存在性与大小看得见，内容看不见 |
+| `import`（事件发在模块加载**之前**，所以拦得住） | **原生代码**：一段 C 里的 `open(2)` 不经审计事件 |
+| `socket.*` / `subprocess.*` / `os.system` / `os.exec*` / `ctypes.*` | 钩子安装**之前**就已经打开的 fd |
+| 受保护根的 `os.listdir` / `os.scandir` | 已经躺在 `sys.modules` 里的模块（钩子装在入口，用户代码还没开始跑，所以这一条在当前装配下够不着） |
+
+### 四、为什么 `SandboxViolation` **不**继承 `OSError`
+
+这是本任务最容易写错、写错就**静默回到原状**的一处。
+
+```python
+class SandboxViolation(OSError):   # ← 错的
+```
+
+策略代码（尤其 A2 生成的那种）到处是 `try: open(p) except OSError: pass`——「读不到就算了」是极自然的写法。若违规是 `OSError`，这些 `except` 会把拦下来的违规**当场吞掉**，策略继续跑、实验继续记分，而报告里没有一处变红。那正是 `:405` 末句说的「**泄漏是静默的，跑完才发现则全部重跑**」。
+
+所以它继承 `Exception`：`except OSError` 抓不到，`except Exception` 才抓得到——而写下 `except Exception: pass` 的人至少是在**明确地**吞掉一个写着「沙箱拒绝」的异常。由 `test_sandbox.py::TestTheViolationCannotBeSwallowedAsAnOSError` 钉住（变异 M2 验证它确实会红）。
+
+### 五、为什么**无条件**装，而不是「A2 专用」
+
+`:1479` 把沙箱描述成「A2 专用，只有它会执行生成的代码」。**实现上不按那条走**，理由与 T2(c) 把隔离跟接口同一条提交是同一条：
+
+* **A2 专用 = opt-in = 有一天会忘。** 忘了的表现是「这次实验的沙箱没装」，而它**不可观测**——只要策略没去读答案，跑出来的数字与装了沙箱时**一模一样**。这正是 critical gap 的定义（无测试、无错误处理、静默）。
+* **默认装 = 没有忘记这条路径。** 代价是零：B0–B5 / M1 / M2 都不读 `config/`、不开 socket、不起子进程（这一条**验过**，见第六节 M6 的反方向断言与全量套件）。若哪一个真读了，那是**它**该被拦下的 bug，不是沙箱过严。
+* **而且它让断言变便宜**：`test_isolation.py` 里那些真子进程测试走的就是生产那条路径（`spawn_strategy` → `strategy_child`），不需要为沙箱再搭一套平行启动方式。**没有第二套启动方式，就没有「两条路不一致」这个 bug 面。**
+
+**位置也是承重的**：钩子装在 `main()` 里、`load_entry` **之前**（用户代码 import 进来的每一个模块都过检查）、`_hello` **之前**（连握手都跑在里面）、而**本模块自己的 import 之后**（钩子摘不掉，早装会让 `strategy_child` 去撞自己的名单）。
+
+### 六、变异验证（6 条改动，全部当场变红）
+
+| # | 变异 | 结果 |
+|---|---|---|
+| M1 | 删掉 `strategy_child.main()` 里的 `sandbox.install()` | **红**（`TestTheSandboxIsOnTheRealChild` 4 条全红） |
+| M2 | `SandboxViolation` 改回继承 `OSError` | **红**（`TestTheViolationCannotBeSwallowedAsAnOSError`） |
+| M3 | `root_of` 的 `is_relative_to` 换成字符串前缀 | **红**（`configs/` 这个兄弟目录被误封） |
+| M4 | `_resolve` 退回「不认 `Path`」的失败即放行 | **红**（4 条） |
+| M5 | `PROTECTED_SUBDIRS` 去掉 `config` | **红**（10 条） |
+| M6 | 往 `src/agent/__init__.py` 塞一句 `from ..adapter import ground_truth` | **红**（`TestAgentImportGraph`） |
+
+> **M1 第一轮只让 3 条变红，把一条弱测试抓了出来。** 那条结构断言（「沙箱装在生产路径上」）原本写的是 `source.index("sandbox.install()")`——而**模块 docstring 里也写着这五个字**（那是说明，不是安装点），于是把 `main()` 里那行整个删掉，它**照样绿**。改成读 AST、只找 `main()` 函数体里的 `Expr(Call(Attribute(attr="install")))` 之后，M1 才把它变红。**这是本次唯一一处「测试看起来在验、实际没验」的地方，是变异验证抓出来的，不是读代码读出来的。**
+
+**M4 那条是从真 bug 来的**，不是构造出来的：`_resolve` 最初只认 `str` 与 `bytes`，而 `pathlib.Path` 两种都不是，于是返回 `None`——而 `None` 的语义是「没有可判的路径，**放行**」。**失败即放行**，方向恰好反了。开发期被 `test_the_absolute_form_is_refused_too` 抓住，修法是 `os.fspath` 一次收齐三种形状，并补一条 `test_path_objects_are_judged_not_skipped` 钉住。
+
+### 七、顺手补上的一个真缺口：`src.adapter.ground_truth` 进 `TestAgentImportGraph.FORBIDDEN`
+
+`:1483` 的 v7 第 2 条要求「往 `src/agent/` 上加时照抄这个形状」。照抄时发现表里**漏了 `src.adapter.ground_truth`**——而它恰恰是**把 `config/` 变成真值的那一步**（`stage1_truth_from_config(path)`）。
+
+**它为什么最容易漏**：`ground_truth` 自己的导入图是干净的（只读文件、不碰 oracle、不碰 scoring）。所以「导入图干净」与「拿不到答案」在这里**不是同一件事**——它是那种「每一层单独看都合规，合起来才是答案」的模块。已加入 `FORBIDDEN`（导入 `src.agent` 实测只拖进 `src.adapter`、`src.adapter.types`、`src.agent.*`，加这一条是安全的）。
+
+**连带把 T10 那条 `GroundTruth` Verify 操作化了。** 原来 `test_isolation.py` 里有一条刻意留下的断言：「**路 3 的期望是成功**——类型够得到，因为类型不是秘密」。沙箱不封 `src.adapter.ground_truth` 这个**模块**（封了它等于承认「导入图干净」就是安全，而上面刚说清那不是），它封的是**那一次读**。于是旧断言**原样成立**，并且被加强成一条更强的话：
+
+> 「够得到类型，够不到值」（T2(c)）→ 「**产出值的那条路也堵死了**」（T10）。
+
+前一句说的是「此刻手上没有」，后一句说的是「**拿不到**」——而这正是 `:405` 要的那件事。
+
+### 八、**没做到的两件事**
+
+**(1) 更强的层（Linux 命名空间）—— 归 `TODOS`，不假装它等于审计钩子。**
+
+严格更强的做法是把 `config/` 从子进程的文件系统里拿掉：
+
+```bash
+unshare -m --map-root-user sh -c 'mount --bind /empty /path/to/repo/config; exec python -m …'
+```
+
+那才是 `:401` 说的「读路径白名单」的正身，而且它**连 `os.stat` 一起挡住**（第三节那张表里唯一一条元数据泄漏）。它需要 Linux + `CAP_SYS_ADMIN`，而**本仓库的开发环境是 Windows**——所以本任务交付的是可移植那一层。已记进 `TODOS.md`（`## 实验` 段）。
+
+**(2) 「禁止读决策缓存」只落了一半，而且这半是具名的。**
+
+`:1482` 那条接口约束（T5 递过来的）说的是：**决策缓存是能力，不是许可。**
+
+* 本模块给的落点是**受保护根机制**——把缓存根填进 `protected_roots` 就封住了（`test_isolation.py` 里有一条真子进程断言，用 `DecisionCache.load("config/stage1_config.json")` 走同一个 `open` 事件，确实撞墙）。
+* 但它**指不出**该填哪个路径：`DecisionCache.load()` / `.save()` 都收一个**显式 `path` 且无默认值**，`cache.__all__` 里也没有任何路径常量——**缓存今天没有规范落盘位置**。
+* **正确的路由是走 stdio**：查询经一条新动词到 runner 侧，由持有缓存的进程按**当前 seed 的键**回答。那要动 `protocol.CLIENT_VERBS = {"hello","probe","sample","report"}`（一个白名单，加动词必须同步 `PROTOCOL_VERSION = 1`），那是 **T2 的协议面**，不在 T10 的 `Files` 里。
+
+处置是**具名的、开着的**，不是「以后再说」：`test_sandbox.py::TestTheCacheIsAnOpenItem` 是一条**指路用的断言**——它断言「`CLIENT_VERBS` 里没有缓存动词」且「`cache.py` 没有默认路径」，**两件当前为真的事**。有人把缓存查询接上 stdio，前半条变红（提醒同步 `PROTOCOL_VERSION`）；有人给 `DecisionCache` 定了默认落盘位置，后半条变红（提醒同时填进 `protected_roots`）。两条变红都不是「测试过时了」，是**这件事现在必须做完**。
+
+> **一件开着的事如果只能靠人记得，它就是下一个 critical gap。** 这是这个模块第十节的全部理由，也是本任务对 T5 递过来的那条约束的**唯一**处置。
+
+### 九、七条 critical gap 全闭：凭什么，以及它**没有**覆盖到的那部分
+
+`:1207` 的七条静默失败路径，前六条在 T2/T4/T5 闭合，**最后一条「策略进程读 `config/`」归 T10**。本次闭合，**凭什么**就是 `:405` 给的那句判据：
+
+> 这条断言的失败方式是「**读成功了**」，所以它是**可测的**。
+
+判据不是「有没有测试」，是「**失败了会不会安静**」。所以验收看的不是「读失败时绿不绿」，是「**读成功时红不红**」：真子进程真去 `open("config/stage1_config.json")`（相对 / 绝对 / `..` 穿越 / `bytes` 四种写法）、真去 `os.listdir("config")`、真去 `from src.adapter.ground_truth import stage1_truth_from_config` 然后调用它——**读到就红**。这四条是 `test_isolation.py::TestTheSandboxIsOnTheRealChild`；M1/M5 两条变异证明它们**在沙箱没装或名单空了的时候确实会红**。
+
+**它没有覆盖到的部分，写在这里，不留给读者自己发现：**
+
+1. **`os.stat` 不受审计**——`config/` 的**存在与大小**看得见（内容看不见）。元数据不是答案，但这是真实的泄漏面，正身是第八节的命名空间层。
+2. **原生代码逃逸**——`ctypes` / `subprocess` 被封正是因为它们是通往审计之外的门，但**这不是证明**「没有别的门」。这是一个**可移植层**，不是安全边界。
+3. **决策缓存的许可**（第八节 (2)）——第 ③ 条边**仍未接线**。七条 critical gap 的闭合**不依赖**它，它也不被这次闭合掩盖。
+4. **只在本仓库的开发环境（Windows / CPython 3.12）实测过**——事件名与参数形状是照着实测写的，不是照着文档写的；换平台需要重跑那组实测。
+
+### 十、与别的任务的接口影响
+
+* **T2 的协议面**：决策缓存要走 stdio 就得加 `CLIENT_VERBS` 动词 + 同步 `PROTOCOL_VERSION`（第八节 (2)）。这是 T2 的 `Files`，不是 T10 的。
+* **T6a / T6b / T6c / T18**：不受影响。沙箱装在每个策略进程上（第五节），而 B0–B5 不读 `config/`、不开 socket——**M6 的反方向断言与 452 条全量套件是这句话的证据**，不是推断。
+* **T16（真靶场）**：沙箱的 `protected_roots` 是唯一的扩展点。若真靶场的真值也落在磁盘上某个目录，填进那里即可，判定逻辑不用改。
+* **T17（CI）**：`test_sandbox.py` 与 `test_isolation.py` 都是纯单测（唯一外部依赖是 `sys.executable` 子进程与 `tmp_path`），`pytest tests/` 直接带上，**不需要 marker**。
