@@ -14,6 +14,7 @@ D7 的强制手段是**进程边界**，理由是 `:389`：v5 删掉了「类型
 | `TestRealProcessBoundary` | 上面两条只在「一个解释器里的两个对象」上成立，而不是真进程 |
 | `TestBudgetIsNotLocal` | 策略改自己那份预算视图就能影响评分（`v6 (d)`） |
 | `TestHandshakeCarriesTheBudget` | 握手送出来的初始预算被**静默丢掉**（T13 写 B0 时撞到） |
+| `TestTheSandboxIsOnTheRealChild` | 进程边界只挡住**对象**，没挡住磁盘上的 `config/`（T10） |
 
 > **为什么非得跑真子进程。** `MemoryChannel` 里两边互相都 import 得到——
 > 在那里断言「拿不到真值」，测到的是「我们没写错」，不是「边界在那儿」。
@@ -174,11 +175,13 @@ class TestAgentImportGraph:
     """
 
     #: 策略侧命名空间里**绝不能**出现的模块：真值本身的定义处
-    #: （`oracle` / `truth`）、runner 侧的发包栈（`runner` / `probe_pool` / `iface`），
+    #: （`oracle` / `truth`）、**把 `config/` 变成真值的那一步**
+    #: （`ground_truth`）、runner 侧的发包栈（`runner` / `probe_pool` / `iface`），
     #: 以及整个评分层（评分层的输入是真值，所以它的每一块都间接握着真值）。
     FORBIDDEN = (
         "src.adapter.oracle",
         "src.adapter.truth",
+        "src.adapter.ground_truth",
         "src.adapter.runner",
         "src.adapter.probe_pool",
         "src.adapter.iface",
@@ -603,6 +606,219 @@ class TestHandshakeCarriesTheBudget:
             "预算不该藏在 result 里——它是 Reply 的字段，测试要盯的就是这一点"
         )
         assert reply.budget_left == 5, "握手没把权威账本的初始值带回来"
+
+
+# ── ⑤ 沙箱：进程边界之外的**第二道**（T10 / D7）─────────────────────────────
+
+
+#: 一个**刻意去找答案**的策略 —— 与上面 `PROBING_STRATEGY` 的区别正是 D7 说的
+#: 那两种失效方式：
+#:
+#: * `PROBING_STRATEGY` 找的是**对象**（`surface.ground_truth`、`sys.modules`、
+#:   协议里没有的动词）。进程边界挡它。
+#: * 这一个找的是**磁盘上的文件**。进程边界**完全不适用**——它没跨过那条边，
+#:   它绕开了整条通路。`config/stage1_config.json` 就是 Stage 1 的
+#:   `GroundTruth`（`:494`），读它一行就得到全部答案。
+#:
+#: 四类探查 + 一条反方向：**最后那条比前面几条都重要**。沙箱若把正常读取也拦了，
+#: 实验就跑不起来，而那时的处置是把它关掉——于是 critical gap 原样回来。
+SANDBOX_PROBING_STRATEGY = '''
+"""测试用的敌对策略：不去够对象，去读文件。"""
+import os
+import sys
+
+
+def run(surface):
+    found = []
+
+    def attempt(label, fn):
+        try:
+            fn()
+        except BaseException as exc:
+            found.append("%s:%s" % (label, type(exc).__name__))
+        else:
+            found.append("%s:ALLOWED" % label)
+
+    def config_relative():
+        open("config/stage1_config.json").close()
+
+    def config_absolute():
+        open(os.path.join(os.getcwd(), "config", "stage1_config.json")).close()
+
+    def config_traversal():
+        open("config/../config/stage1_config.json").close()
+
+    def config_bytes():
+        open(b"config/stage1_config.json").close()
+
+    def config_listing():
+        os.listdir("config")
+
+    def network():
+        import socket  # noqa: F401
+
+    def spawn():
+        import subprocess  # noqa: F401
+
+    def shell():
+        os.system("echo hi")
+
+    def derive():
+        # T10 Verify 那句「策略进程无法构造 GroundTruth」的操作形式：
+        # 函数不是秘密，**它必须读一个受保护文件才能产出真值**。
+        from src.adapter.ground_truth import stage1_truth_from_config
+        stage1_truth_from_config("config/stage1_config.json")
+
+    def cache_from_protected_root():
+        # 缓存读的也是文件，于是走的是同一个 open 事件——受保护根一封，
+        # 缓存加载器在这条路上同样撞墙（它今天没有规范位置，见 test_sandbox）。
+        from src.agent.cache import DecisionCache
+        DecisionCache.load("config/stage1_config.json")
+
+    attempt("config-relative", config_relative)
+    attempt("config-absolute", config_absolute)
+    attempt("config-traversal", config_traversal)
+    attempt("config-bytes", config_bytes)
+    attempt("config-listing", config_listing)
+    attempt("network", network)
+    attempt("subprocess", spawn)
+    attempt("os-system", shell)
+    attempt("derive-truth", derive)
+    attempt("cache-under-root", cache_from_protected_root)
+    # 反方向：这些**必须**继续能用
+    attempt("read-legit", lambda: open("pyproject.toml").close())
+    attempt("read-own-source", lambda: open("src/adapter/surface.py").close())
+    attempt("import-legit", lambda: __import__("ipaddress"))
+    attempt("import-strategy", lambda: __import__("src.baselines.b0_probe_all"))
+
+    sys.stderr.write("SANDBOX " + "|".join(found) + "\\n")
+'''
+
+
+class TestTheSandboxIsOnTheRealChild:
+    """**T10 的 Verify 本体**（`:1478`）：四条禁止，加上那条 `GroundTruth` 断言。
+
+    为什么跑真子进程而不是在同一个解释器里调 `sandbox.check_*`：那几条纯函数的
+    穷举在 `tests/unit/test_sandbox.py` 里已经做完了。**这里问的是另一个问题**——
+    「那些判定真的挂在了生产那条启动路径上吗」。判定对而钩子没装，是这份设计里
+    最可能的失效，而它**不会有任何症状**。
+
+    > 反过来说：这一组全绿 + `test_sandbox.py` 全绿，才等于「沙箱生效」。少了
+    > 任何一边都只是一个空转的证明。
+    """
+
+    #: 必须**当场炸**的那些：T10 Verify 的四条禁止 + 由此推出的构造真值那条。
+    MUST_BE_REFUSED = (
+        "config-relative",
+        "config-absolute",
+        "config-traversal",
+        "config-bytes",
+        "config-listing",
+        "network",
+        "subprocess",
+        "os-system",
+        "derive-truth",
+        "cache-under-root",
+    )
+
+    #: 必须**照常能用**的那些：沙箱太严会让实验跑不起来。
+    MUST_STILL_WORK = (
+        "read-legit",
+        "read-own-source",
+        "import-legit",
+        "import-strategy",
+    )
+
+    def _run(self, tmp_path: Path) -> dict[str, str]:
+        (tmp_path / "sandbox_probe_strategy.py").write_text(
+            SANDBOX_PROBING_STRATEGY, encoding="utf-8"
+        )
+        server = make_server()
+        from src.adapter.runner import spawn_strategy
+
+        import os
+
+        env = {"PYTHONPATH": f"{REPO_ROOT}{os.pathsep}{tmp_path}"}
+        process = spawn_strategy(
+            "sandbox_probe_strategy:run", server=server, cwd=str(REPO_ROOT), extra_env=env
+        )
+        code = process.wait(timeout=30)
+        stderr = process.stderr()
+        assert code == 0, f"子进程退出码 {code}（沙箱不该让策略自己崩掉）\nstderr:\n{stderr}"
+        line = [ln for ln in stderr.splitlines() if ln.startswith("SANDBOX ")]
+        assert line, f"没读到子进程的报告\nstderr:\n{stderr}"
+        return dict(item.split(":", 1) for item in line[0][len("SANDBOX ") :].split("|"))
+
+    def test_every_prohibited_capability_is_refused_in_the_real_child(self, tmp_path: Path) -> None:
+        report = self._run(tmp_path)
+        for label in self.MUST_BE_REFUSED:
+            assert report[label] == "SandboxViolation", (
+                f"{label} 的结果是 {report[label]!r}，不是沙箱违规——"
+                "判定逻辑在，但钩子没挂在这条启动路径上"
+            )
+
+    def test_the_sandbox_does_not_break_an_honest_strategy(self, tmp_path: Path) -> None:
+        """**这一条是「沙箱会不会被关掉」的守门员。**"""
+        report = self._run(tmp_path)
+        for label in self.MUST_STILL_WORK:
+            assert report[label] == "ALLOWED", (
+                f"{label} 被误伤成 {report[label]!r}——沙箱太严，"
+                "而跑不起来的沙箱的下场是被关掉"
+            )
+
+    def test_deriving_the_truth_dies_on_the_read_not_on_the_type(self, tmp_path: Path) -> None:
+        """把「够得到类型，够不到值」（`PROBING_STRATEGY` 路径 5）升级一句：
+
+        **产出值的那条路也堵死了。** 前一句说的是「此刻手上没有」，这一句说的是
+        「拿不到」——而 `:405` 要求的正是后者（「子进程读 `config/` 必须失败」）。
+        """
+        report = self._run(tmp_path)
+        assert report["derive-truth"] == "SandboxViolation"
+        # 类型本身仍然 import 得到（`test_sandbox.py` 有单独一条讲为什么不封它）
+        assert report["import-legit"] == "ALLOWED"
+
+    def test_the_sandbox_holds_for_every_strategy_not_just_hostile_ones(self) -> None:
+        """**「A2 专用」为什么不取**，用一条结构断言说清：B0 走的是同一条入口。
+
+        `strategy_child.main()` 无条件装沙箱，所以没有「这次的策略忘了装沙箱」
+        这种状态——而那种状态是**不可观测**的（跑出来的数字与装了一样）。
+
+        **读 AST，不读文本。** 第一版写的是 `source.index("sandbox.install()")`，
+        而模块 docstring 里也写着这五个字（那是说明，不是安装点）——于是把
+        `main()` 里那行整个删掉，这条测试**照样绿**。变异验证把它抓出来了。
+        """
+        import ast
+
+        import src.adapter.strategy_child as child
+
+        tree = ast.parse(Path(child.__file__).read_text(encoding="utf-8"))
+        main = next(
+            node
+            for node in tree.body
+            if isinstance(node, ast.FunctionDef) and node.name == "main"
+        )
+
+        def install_lines() -> list[int]:
+            found = []
+            for node in main.body:
+                if not (isinstance(node, ast.Expr) and isinstance(node.value, ast.Call)):
+                    continue
+                func = node.value.func
+                if isinstance(func, ast.Attribute) and func.attr == "install":
+                    found.append(node.lineno)
+            return found
+
+        def entry_line() -> int:
+            for node in ast.walk(main):
+                if isinstance(node, ast.Assign) and isinstance(node.value, ast.Call):
+                    func = node.value.func
+                    if isinstance(func, ast.Name) and func.id == "load_entry":
+                        return node.lineno
+            raise AssertionError("在 `main()` 里找不到 `load_entry` 的调用点")
+
+        assert install_lines(), "`main()` 里没有装沙箱——装了等于没装，且毫无症状"
+        # 装在 `load_entry` 之前：策略 import 进来的每一个模块都要过检查。
+        assert min(install_lines()) < entry_line()
 
 
 # ── 接口自身的边界 ──────────────────────────────────────────────────────────

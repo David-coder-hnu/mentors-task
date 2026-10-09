@@ -1,8 +1,20 @@
 """策略子进程的入口 —— `python -m src.adapter.strategy_child --entry mod:run`
 
-**这个模块的导入图定义了策略进程能看到什么。** 它导入 `surface` 与
-`protocol`，```不导入 `oracle` / `truth` / `runner` / `probe_pool` / `iface` ``。
+**这个模块的导入图定义了策略进程能看到什么。** 它导入 `surface`、`protocol` 与
+`sandbox`，```不导入 `oracle` / `truth` / `runner` / `probe_pool` / `iface` ``。
 `tests/unit/test_isolation.py::TestImportGraph` 在一个干净子进程里断言这件事。
+
+## 沙箱装在这里，而且是**无条件**的（T10）
+
+`main()` 在 `load_entry` **之前**调 `sandbox.install()`，于是**每一个**策略进程
+都带着沙箱跑，不区分 A2 与其他策略。理由在 `sandbox.py` 的模块 docstring 第六节：
+「A2 专用」等于 opt-in 等于有一天会忘，而忘了的表现（这次实验没装沙箱）**不可
+观测**——跑出来的数字与装了一样。装在唯一那条启动路径上则没有第二套走法。
+
+位置是关键：**在 `load_entry` 之前**，所以用户代码 import 进来的每一个模块都要
+过 `sandbox` 的检查；**在 `_hello` 之前**，所以连握手都跑在沙箱里。而它必须在
+本模块自己的 import **之后**——那些是我们的代码，且钩子摘不掉，早装只会让
+`strategy_child` 自己去撞自己的名单。
 
 ## 为什么 stdout 被换成了 stderr
 
@@ -29,7 +41,7 @@ import sys
 import traceback
 from collections.abc import Callable
 
-from . import protocol
+from . import protocol, sandbox
 from .protocol import LineChannel, Reply, Request, reply_from_wire, request_to_wire
 from .surface import ProbeSurface, SurfaceError
 
@@ -93,6 +105,11 @@ def main(argv: list[str] | None = None) -> int:
     wire_out = sys.stdout
     sys.stdout = sys.stderr
     channel = protocol.JsonLineChannel(sys.stdin, wire_out)
+
+    # **沙箱先于一切用户代码。** 装在 `load_entry` 之前，所以策略 import 进来的
+    # 每一个模块都过检查；装在 `_hello` 之前，所以握手也跑在里面。理由与它的
+    # 位置见模块 docstring，「A2 专用」为什么不取也在那里。
+    sandbox.install()
 
     try:
         run = load_entry(args.entry)
