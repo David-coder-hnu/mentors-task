@@ -157,6 +157,87 @@ class TestImportGraph:
         assert not hasattr(ProbeSurface, "ground_truth")
 
 
+class TestAgentImportGraph:
+    """`src.agent` 的导入图里同样不得出现真值侧（T5 加的一条）。
+
+    **为什么 `surface` 那条不够。** T5 往策略进程里又塞了一个包（决策层），
+    而它和 `surface` 是两条独立的导入路径：`surface` 干净不代表 `agent` 干净。
+    最容易踩的坑很具体——`src/scoring/` 里有一个现成的最长前缀匹配、现成的
+    状态归一化，"顺手复用"看起来完全合理，而**那一层必须有真值**
+    （见 `src/scoring/__init__.py`）。所以 `decide.Stage1State.prefix_for()`
+    自带了一份只用 `ipaddress` 的匹配；它**不是重复代码，是 D7 的代价**，
+    这条断言就是收那份代价的凭据。
+
+    **必须在干净子进程里做**，理由同 `TestImportGraph`：pytest 进程自己早就
+    import 过 `oracle` 与 `runner` 了。
+    """
+
+    #: 策略侧命名空间里**绝不能**出现的模块：真值本身的定义处
+    #: （`oracle` / `truth`）、runner 侧的发包栈（`runner` / `probe_pool` / `iface`），
+    #: 以及整个评分层（评分层的输入是真值，所以它的每一块都间接握着真值）。
+    FORBIDDEN = (
+        "src.adapter.oracle",
+        "src.adapter.truth",
+        "src.adapter.runner",
+        "src.adapter.probe_pool",
+        "src.adapter.iface",
+    )
+
+    def _child_import_graph(self) -> list[str]:
+        code = (
+            "import json, sys;"
+            "import src.agent;"
+            "print(json.dumps(sorted(m for m in sys.modules if m.startswith('src.'))))"
+        )
+        out = subprocess.run(
+            [sys.executable, "-c", code],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return json.loads(out.stdout.strip().splitlines()[-1])
+
+    def test_agent_does_not_pull_in_truth_or_the_runner_side(self) -> None:
+        modules = self._child_import_graph()
+        leaked = [m for m in modules if m in self.FORBIDDEN]
+        assert not leaked, (
+            f"导入 `src.agent` 会连带导入 {leaked}——"
+            "策略进程的命名空间里出现了真值 / runner 侧，违反 D7"
+        )
+
+    def test_agent_does_not_pull_in_the_scoring_layer(self) -> None:
+        """单列一条：`src.scoring` 整层都在黑名单里，不只是它的某个子模块。
+
+        写成前缀匹配而不是列名字，是因为**往 `src/scoring/` 里加一个新文件
+        不该需要回来改这条测试**——那正是"名单会忘"的形状。
+        """
+        modules = self._child_import_graph()
+        leaked = [m for m in modules if m == "src.scoring" or m.startswith("src.scoring.")]
+        assert not leaked, f"导入 `src.agent` 会连带导入评分层 {leaked}——它必须有真值"
+
+    def test_agent_cannot_reach_the_network(self) -> None:
+        """**Stage 1 的决策层不许能联网。**（T5 加的一条）
+
+        T5 的 `Completion` 是一个注入口（`decide.py`），Stage 1 的测试传假函数，
+        于是"不接 API"不需要靠 code review 保证——**本包没有任何一个可以联网的
+        import**。这条把它变成可断言的结构事实：一个 `socket` / `ssl` /
+        `http.client` / `urllib.request` 都没被拖进来。
+
+        > 为什么值得单列一条：一个"顺手 `import requests` 兜个底"的改动，
+        > 会让**回放**在一份不完整的缓存上悄悄联网（见 `decide.py` 的
+        > 离线回放模式）。那是一次没有任何人记录的调用，而报告里写着它是复现。
+        """
+        modules = self._child_import_graph()
+        network = sorted(
+            m
+            for m in modules
+            if m in {"socket", "ssl", "http.client", "urllib.request", "asyncio"}
+            or m.split(".")[0] in {"requests", "httpx", "openai", "anthropic", "urllib3"}
+        )
+        assert not network, f"导入 `src.agent` 会连带导入网络客户端 {network}"
+
+
 # ── ② 第 ① 条边上的字节 ─────────────────────────────────────────────────────
 
 
