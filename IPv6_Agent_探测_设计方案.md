@@ -1189,22 +1189,27 @@ class Oracle:                # runner 侧持有，策略进程拿不到（进程
 | `probe()` | 靶场队列满丢包 → 伪装成超时 | **是**（T2：`test_range_logs.py` 三层各一条） | **是**（T2：`RangeLedger.reconcile()`） | **是** ← v7 降级，见下 |
 | `probe()` | 迟到回包归属于错误的探测 | **是**（T2：`test_probe_pool.py::test_late_reply_*`） | **是**（T2：`late_replies` 单独记账，不翻案） | **是**（`ProbeRun.late_replies`） |
 | `probe()` | 发包失败（无 `CAP_NET_RAW` / 无路由） | **是**（T2：单测 + 集成各一条） | **是**（T2：`SendFailure` → `send_failed` 三态） | **是**（`Response.error`） |
-| `agent.py` | 缓存键漏 prompt/工具池版本 → 静默复用旧决策 | 否 → **补**（4A） | 否 → **补** | **否（静默）** ← **critical gap** |
-| `agent.py` | LLM 返回畸形/越界 dict | 否 → **补** | 否 → **补 schema 校验** | 否 |
+| `agent.py` | 缓存键漏 prompt/工具池版本 → 静默复用旧决策 | **是**（T5：`test_decision_cache.py::TestContentHashesAreInTheKey` **16** 条） | **是**（T5：`prompt` 与 `tool_pool` 入键的是**内容哈希**——`cache.py`。**没有版本号可忘，因为键就来自内容本身**） | **是** ← v7 闭合：改一句 prompt / 模板 / 工具池描述 ⇒ 当场未命中 |
+| `agent.py` | LLM 返回畸形/越界 dict | **是**（T5：`test_decide.py::TestParseAction` **34** 条） | **是**（T5：`decide.parse_action()` 走白名单键集，未知键**拒绝而非忽略**；`reason` 必填非空） | **是**（`MalformedDecision` 带原文） |
 | `ground_truth()` | 前缀 `rate==0` 与「前缀不在 config 里」语义未区分 | **是**（T3：`test_ground_truth.py::TestTwoSets` 5 条） | **是**（T3：`SubnetTable` 把 `configured`/`responsive`/`silent` 分成三个集合；靶场静默跳过的 subnet 由 `ConfigError` 拦住） | 否（**静默**——两者观测上同形，只有真值侧能分开） |
 | `score()` | **零探测的运行被折成「0 浪费」** | **是**（T4：`test_an_empty_run_is_not_a_zero_ratio`） | **是**（T4：`ScoringError`，**整轮拒答**——`0/0` 退回 `None` 会让它在下游变成 NaN） | **是**（当场炸） |
 | `score()` | **声明的粒度与 config 错位** → 该记的没记 / 记到别人头上 | **是**（T4：refined / off-target 两条） | **是**（T4：按最长前缀匹配归并，并留 `reports_refined` / `reports_off_target` 两列） | **是**（诊断列） |
 | `score()` | **`aliased_caught` 被「把每个前缀都声明成 aliased」打满** | **是**（T4：`TestTheEndpointIsGameable` 2 条） | **否**（**修法未定，归 T14**——见「主端点与胜负判据」段的 v7 注） | **是**（T4 的 `aliased_false_positives` 列让它显示出来；**不是静默**，所以不计入下面的 critical gap） |
-| `ProbeSurface` | **策略越界读到真值字段**（D7） | **是**（T2(c)：`test_isolation.py` **28** 条，进 CI） | **是**（进程边界 + 出边白名单/黑名单） | **是** ← v7 降级：`TruthLeak` 会当场炸，不再等跑完 |
-| `state` 组装 | **并发下到达顺序影响 `state` → 缓存永不命中 → 不可复现**（D9） | 否 → **补** | 否 → **补规范化** | **否（静默）** ← **critical gap** |
+| `ProbeSurface` | **策略越界读到真值字段**（D7） | **是**（T2(c)+T5：`test_isolation.py` **31** 条，进 CI） | **是**（进程边界 + 出边白名单/黑名单） | **是** ← v7 降级：`TruthLeak` 会当场炸，不再等跑完 |
+| `state` 组装 | **并发下到达顺序影响 `state` → 缓存永不命中 → 不可复现**（D9） | **是**（T5：`test_canonical.py::TestOrderIndependence` 6 条 + `TestListIsRejected` 4 条；`test_decide.py::TestStateIsOrderIndependent` **12** 条） | **是**（T5：`canonical()` 的类型白名单**当场拒掉 `list`** —— 顺序有没有语义必须被显式选定；`Stage1State` 的每个字段都按构造序无关） | **是** ← v7 闭合：`list` / 墙钟 / `nan` 一进 `state` 就抛 `CanonicalError` |
 | `RouterShim` | 合成响应与 `GroundTruth.routers` 不一致 | 否 → **补契约测试** | 否 | 否 |
-| `cache.key()` | **内建 `hash()` 按进程加盐 → 跨进程永不命中**（v6 / V6-6） | 否 → **补**（跨 `PYTHONHASHSEED`，进 CI） | 否 → **补稳定摘要** | **否（静默）** ← **critical gap** |
+| `cache.key()` | **内建 `hash()` 按进程加盐 → 跨进程永不命中**（v6 / V6-6） | **是**（T5：`TestCrossProcessStability` / `TestCrossProcessKeyStability` 各 3 条，进 CI 归 T17） | **是**（T5：`canonical.digest()` 只走 `hashlib.sha256`，并把缓存文件的**指纹**一并编进去） | **是** ← v7 闭合：见下方「副作用」，加盐会让**每一份已发布的缓存都拒绝加载** |
 | 预算台账 | **策略侧自记账**（v6 / V6-8）→ 超预算不被发现 | 否 → **补**（runner 侧权威计数） | 否 → **补拒绝分支** | 否（静默） |
 | 策略进程 | **读 `config/`**（v6 / T10）→ 直接拿到真值 | 否 → **补**（黑名单 + 单测） | 否 → **补沙箱** | **否（静默）** ← **critical gap** |
 | 探测池 | **池大小无默认值却被漏传**（v6 / V6-9）→ 队列满丢包 → 伪装超时 | **是**（T2：`test_probe_pool.py::TestMandatoryPoolSize` 4 条） | **是**（T2：必填无默认值 → 漏传是 `TypeError`） | **是** ← v7 降级：漏传当场炸，不再静默 |
 | `probe_pool` | **套接字接收队列尾丢弃**（v7 / T2(b)）→ 回包**静默**丢失，**靶场三层对账看不见** | **是**（T2(b)：`test_probe_pool.py::TestDrainDuringFill` 3 条） | **部分**（`drain_every_sends` 缓解；**没有任何断言把池大小钉在无丢包上界之下**） | **是**（`perf_sweep` 表里的「回包路径丢」列）← **但不自动**：要人去读表 |
 
-**七条 critical gap**（无测试 + 无错误处理 + 静默）：~~丢包伪装超时~~、缓存键漏版本、~~策略越界读真值~~、**到达顺序污染缓存键**、**跨进程哈希加盐**、**策略进程读 config**、~~池大小漏传~~。
+**七条 critical gap**（无测试 + 无错误处理 + 静默）：~~丢包伪装超时~~、~~缓存键漏版本~~、~~策略越界读真值~~、~~到达顺序污染缓存键~~、~~跨进程哈希加盐~~、**策略进程读 config**、~~池大小漏传~~。
+
+> **⚠️ v7 复算（2026-10-09，清点 T5 之后）：七条里闭合六条，还开着一条。** 划线的是闭合的；
+> 唯一还开着的**策略进程读 `config/`** 归 **T10**（A2 的沙箱与允许清单）。四条里的三条是同一条
+> 任务（T5）闭合的——这正是上一版注里那句排期结论的兑现：**T5 是当时静默失败面上最大的一块，
+> 四条占了三条**。逐条的「凭什么」见下表各行的三列。
 
 > **⚠️ v7 更正（2026-10-09，清点 T4 之后的状态）：实际还开着的是四条，不是六条；而且其中三条在同一条任务上。**
 > 上一版注（本段末的「v7（T2）」注）写「七条降为六条」，**两处都不对**：一是它只把「丢包伪装超时」记进了这七条，二**它点名闭合的另外两条（「发包失败的三态」「迟到回包不翻案」）根本不是这七条的成员**——那两条是上表里并列的独立行，从来不在名单里。按上表**三列全读**（有测试？有错误处理？用户看得见？），闭合的是这**三条**：
@@ -1213,15 +1218,15 @@ class Oracle:                # runner 侧持有，策略进程拿不到（进程
 > |---|---|---|
 > | 丢包伪装超时 | T2 | `RangeLedger.reconcile()` 任一层丢失非零抛 `RoundInvalid` |
 > | 池大小漏传 | T2 | `ProbePool` 必填无默认值 → 漏传是 `TypeError`；`test_probe_pool.py::TestMandatoryPoolSize` 4 条 |
-> | 策略越界读真值 | T2(c) | 进程边界 + 出边白名单/黑名单；`test_isolation.py` 现 **28** 条，进 CI |
+> | 策略越界读真值 | T2(c) | 进程边界 + 出边白名单/黑名单；`test_isolation.py` 现 **31** 条，进 CI |
 >
-> **所以还开着的是这四条——三条归 T5，一条归 T10：**
-> - **缓存键漏版本** → **T5**（4A）
-> - **到达顺序污染缓存键** → **T5**（D9 的 `state` 规范化）
-> - **跨进程哈希加盐** → **T5**（V6-6）
-> - 策略进程读 `config/` → T10
+> **所以当时还开着的是这四条——三条归 T5，一条归 T10：**
+> - **缓存键漏版本** → **T5**（4A）✅ **T5 已闭合**（2026-10-09，内容哈希入键）
+> - **到达顺序污染缓存键** → **T5**（D9 的 `state` 规范化）✅ **T5 已闭合**（`canonical()` 拒 `list`）
+> - **跨进程哈希加盐** → **T5**（V6-6）✅ **T5 已闭合**（`digest()` 只用 `hashlib`，且失败变响）
+> - 策略进程读 `config/` → T10 ← **唯一还开着的**
 >
-> **这个分布本身就是一条排期结论**：T5 不是「Agent 那条线的下一步」，它是**当前静默失败面上最大的一块**——四条里占了三条，而 T11/T13/T14 一条都不含。**判据 5 的覆盖图（`0/21`）过期只是记账问题，这一条的后果是排期问题。**（另：覆盖图与表里「`test_isolation.py` 22 条」两处也过期，同批更正——**数字从表里读得到，不该靠记**。）
+> **这个分布本身就是一条排期结论**：T5 不是「Agent 那条线的下一步」，它是**当时静默失败面上最大的一块**——四条里占了三条，而 T11/T13/T14 一条都不含。**判据 5 的覆盖图（`0/21`）过期只是记账问题，这一条的后果是排期问题。**（覆盖图仍过期，归 T8；`test_isolation.py` 的条数已同批更正——**数字从表里读得到，不该靠记**。）
 >
 > **第八条（套接字接收队列尾丢弃）另计**：它与这七条的形状不同（成因一半在我们自己的循环里），**仍然开着**，执行化落在 `TODOS.md` 的 P2 → T13。
 
@@ -1400,13 +1405,41 @@ class Oracle:                # runner 侧持有，策略进程拿不到（进程
     - 🔴 **发现（新，未修）：`aliased_caught` 单独用是可以被博弈的。** 按定义，它在「把每个前缀都声明成 aliased」这个平凡策略上取到**最大值**，而两个共主端点里**另一个也不惩罚声明**（`aliased_waste_ratio` 只管探测花在哪，不管你怎么报）。于是存在一条退化路径：不改进任何探测行为，只把 `report(p, True)` 打满。**当前冒烟表的五行没有一条会走这条路**（B0/B1 不声明；B4/M1/M2 与 B5 都按实际判定声明），所以它**不是今天的数据缺陷，是端点定义的缺口**——而 A2 是会被交到 `report` 工具手里的 LLM。**已把 `aliased_false_positives` 与 `aliased_misses` 算出来让缺口有数可看**；**修它归 T14**（端点定义的归属地），见该任务块的 v7 追加。
     - **变异验证**（本仓库第三次对测试自己下手，六个承重决定逐个改错）：`send_failed` 不计入分子 **1 红**；归属退化成正序（最短前缀）**1 红**；重复声明改成先者胜 **1 红**；`misses` 不再由 `caught` 推出 **7 红**（恒等式当场炸）；声明要求逐字命中 **2 红**；回包不回包都算「真有内容」**1 红**。六处全部当场变红，无一条是「函数被调用了」式的空转。
   - **v6：`src/scoring/entropy.py` 移出 Stage 1，改落 Stage 2 起点。** 理由：`info_gain` 已被 D8 降为次要诊断量，**而它此前和主端点挤在同一个 Stage 1 交付里**——于是"跑出冒烟表"这件事被一个不承重的估计器拖住。**Stage 1 的 `score()` 只算可数端点**（`aliased_waste_ratio` / `aliased_caught`，见 T14）；`entropy.py` 连同它的**小样本偏差标定测试**一起移到 Stage 2，**放在"确认次要指标是否值得报"那一步**（OQ 7 的 v4 结论）。
-- [ ] **T5 (P1, human: ~1d / CC: ~1h)** — `src/agent/` — LLM 决策体 + 决策缓存（键含 prompt/工具池内容哈希）
+- [x] **T5 (P1, human: ~1d / CC: ~1h)** — `src/agent/` — LLM 决策体 + 决策缓存（键含 prompt/工具池内容哈希）✅ **完成于 2026-10-09**（含 v7 追加的四条判断与一条接口发现）
   - Surfaced by: Issue 4A（critical）
-  - Files: `src/agent/decide.py`, `src/agent/cache.py`, `src/agent/prompts/`
+  - Files: `src/agent/decide.py`, `src/agent/cache.py`, `src/agent/prompts/` —— **v7 追加 `src/agent/canonical.py`**（见下）
   - Verify: 单测断言「改 prompt 内容 ⇒ 缓存未命中」；schema 校验拒绝畸形输出
   - **v6 两处**：
     - **(a) Stage 1 的范围是「只构建、不参赛」。** A1/A2 在 Stage 1 不上场（`:567`），**所以 T5 在 Stage 1 的交付物只有两样：决策缓存与状态规范化**。`decide()` 本身要能跑通单测，但**它不产生任何进入冒烟表的数字**。这条写清楚是为了**防止 Agent 的调试开销拖住 Stage 1 的交付时点**——D11 已把 Stage 1 定性为 harness 前置，而 harness 里真正被 Stage 2 复用的是**缓存与规范化**，不是决策质量。
     - **(b) 缓存键必须是稳定哈希（缓存 bug 4）。** 键里的 `digest` **必须是 `hashlib.sha256` / `blake2b` 的十六进制摘要，不是 Python 内建 `hash()`**——后者在 PEP 456 下**按进程加盐**，同一份状态在两个进程里算出不同的键，**缓存从此永不命中，而报错是静默的**（看起来只是"这次没命中"，不会抛异常）。**Verify 追加**：同一个键在两个不同的 `PYTHONHASHSEED` 值下必须相等（进 CI，见 T17）。
+  - **v7（2026-10-09）：T5 已落地。** 上面两条 Verify 各有落点，另有三处判断与一处**新发现的接口约束**是原任务块里没有、落地时才必须决定的。**测试增量：三个新测试文件 + `test_isolation.py` 加 3 条 = 167 条**（`test_canonical.py` 33、`test_decision_cache.py` 50、`test_decide.py` 81）；变异验证 **29 条改动全部当场变红**，无一条是"函数被调用了"式的空转。
+    - **Files 实际落地五个模块 + 一个测试包**（比上面声明的三个多两个，都有理由）：
+      | 文件 | 为什么在这里 |
+      |---|---|
+      | **`canonical.py`**（**声明外新增**） | `state` 的类型白名单 + 稳定摘要。**bug 2 与 bug 4 的修法都住在这里**，而不是散在 `cache.py` 与 `decide.py` 里——一处规则比两处不容易漂 |
+      | `cache.py` | 缓存键（五分量）、`DecisionCache`、文件指纹 |
+      | `decide.py` | `Stage1State`、动作 schema、`decide()`、`Completion` 注入口 |
+      | `prompts/__init__.py` | 模板 + `render()` |
+      | `__init__.py` | 包边界、D7 的导入图规则、以及下面那条 T5↔T10 接口 |
+    - **⚠️ 判断 1：拒绝 `list` —— 这就是 bug 2 的修法本身。** 一个 `list` 没有唯一的规范形式——顺序可能承载语义（那是 `tuple`）也可能不承载（那是 `frozenset`）。让作者**显式选一个**，于是"并发下顺手 `append`"这条路径根本走不通。**拒绝而不是排序**：`list` 排了序会让"这个顺序其实有意义"的用法被静默改掉，那是另一种静默失效。同批拒绝的还有墙钟（`:564` 要求逻辑序号）与非有限浮点（`nan != nan` ⇒ 键永久漂移）。**错误消息必须给出出路**（换成 `tuple` 还是 `frozenset`），否则下一个人只会换一种容器再试一次——单测里有一条专门盯这个消息。
+    - **⚠️ 判断 2：`prompt` 入键的是「渲染后的字节」，不是模板名。** 只改 `render()` 而不改模板，模型看到的东西变了而键没变——又是 bug 1 的形状。**这条还堵住一个不显眼的入口**：`DECIDER_TEMPLATE` 那段文字本身不在键里，**只**通过渲染后的字节进键；少了这个分量，改一句模板会静默全量命中旧缓存。单测 `test_editing_the_template_re_asks_the_model` 就是为这个入口写的（第一轮变异验证漏掉了它，见下）。
+    - **⚠️ 判断 3：缓存只存模型的「原始文本」，每次命中都重新过 schema 校验。** 若存解析结果，**命中路径就绕过了校验**——一份被手改过、或由更宽松的旧版本写下的缓存条目，就能把一条非法动作静默送进实验。**推论（原任务块里没写的）：畸形输出也必须进缓存。** 不缓存它，回放会重新问一次模型，而模型完全可以给出另一个答案——于是"复现"复现出了**另一条轨迹**，且没有任何一处会红。所以第二次仍然抛，但**不许再调用 `completion`**（`test_decide.py::TestMalformedOutputIsCached` 断言的就是那句"调用次数还是 1"）。
+    - **⚠️ `config` 整份入键、不做字段白名单；`config` 传路径一律拒绝。** 白名单的失效方式是「下一个人加了一个影响决策的字段，而没人记得回来改白名单」——**那正是 bug 3 的形状**（`:565`）。传路径看起来"很规范"，但**路径在文件内容变化时不变**（换模型、改温度都会命中旧键），所以 `KeyMaterialError` 当场拦下。同一条理由让 `tool_pool` 入的是「名字 → 描述」的整份映射而不是名字集合（A2 的卖点是构造新原语，见 `:618`）。
+    - **⚠️ 缓存文件带指纹，`KEY_SCHEME` 是这里唯一需要人维护的版本号。** `prompt` / `tool_pool` 靠内容哈希（无号可忘），但**键的算法本身**改了之后旧的键整体失去意义，没有任何内容哈希能反映这件事。所以 `KEY_SCHEME` 编进 `cache_fingerprint()`，写进缓存文件头，**`load()` 不符就抛 `CacheFormatError`，而不是"加载进来然后永不命中"**——一个 0% 命中率且不报错的缓存，看起来就是"这次没命中"。
+      - **副作用（新，值得单独记）：这条把 bug 4 也一起变成"响的"。** 若 `digest` 真被换回内建 `hash()`，**指纹本身每进程都不同**，于是**每一份已发布的缓存都拒绝加载**，而不是静默 0% 命中。T5(b) 的修法原本只保证"键跨进程相等"，指纹顺手把它的失效方式从静默改成了响。
+    - **🔴 接口发现（新，未在文档任何一处写过）：决策缓存是 runner 侧的东西，而 `decide()` 现在是进程内直连。** 数据流图把决策缓存画在 **runner 进程的方框里**，同一张图的第 ③ 条边又写着**「策略进程不得读决策缓存文件本身——缓存里存着别的策略的决策」**（`## 约束` 段的沙箱规则里也有一条「禁止读决策缓存」）。**两处合起来的意思是：`DecisionCache` 是能力，不是许可。** 谁允许调用它、经哪条路调用，是 **T10 的沙箱规则**；要把缓存查询搬上 stdio 得动 `protocol.CLIENT_VERBS`（一个白名单，加动词必须同步 `PROTOCOL_VERSION`），属 T2 的协议面。**当前代码里没有这条接线**，而这条约束在 T5 之前没有任何落点——它现在写在 `cache.DecisionCache` 的 docstring 与 `src/agent/__init__.py` 里，**收口归 T10**。
+    - **⚠️ 判据 6(ii) 的分母（新发现）：** 「决策缓存命中率 == 100%」**只有在"重放那一遍"的口径下才可能成立**。按整个会话累计，第一遍跑当然是全未命中，那条判据会**永远不可能通过**。两种口径的差别已钉进 `test_decision_cache.py::TestLookupAndStats::test_a_perfect_replay_reaches_hit_rate_one`（同一个会话里把两种数都断言出来）。**T6c 的 Verify 与 T9/T18 引用这条判据时，分母按"重放那一遍"读。**
+    - **`LLM_IDENTITY_KEYS` 六项是硬检查，实例化 `:588`。** 模型 ID、版本、温度、top_p、max_tokens、调用日期，缺任一项 `decide()` 直接拒，**且在任何模型调用之前**判断（`test_the_check_happens_before_the_model_is_called`——先花钱再发现 config 不合法，是这条检查最没意义的失效方式）。身份**已经在哈希里**了（config 整份入键），这条拦的是另一半：一份没有身份的 config，它的键是合法的、缓存是可加载的、结果看起来完全正常，只是没人知道它对应哪个模型。**填 `config/stage1_config.json` 归 T13。**
+    - **`decide.Stage1State.prefix_for()` 自带一份最长前缀匹配，刻意不 import `src/scoring/`。** 那一层必须有真值（见 `src/scoring/__init__.py`），而本模块跑在策略进程里，导入它等于把真值拖进策略侧命名空间，直接违反 D7。**「复用一个现成函数」在这里是不能做的优化**——它是 D7 的代价，不是重复代码。归属规则同理（`:718` 的判据 5 覆盖图里 `ground_truth()` 那一格）。
+    - **⚠️ 跨进程断言必须自校验，而且子进程不得用 `-I`。** 跨 `PYTHONHASHSEED` 的两条测试各自**先断言内建 `hash("probe")` 在两个子进程里确实不同**，再断言摘要相同——否则那个环境变量没生效时，测试会**绿得毫无异常**（两个子进程共享同一个种子，什么都没测）。`-I` 蕴含 `-E`，而 `-E` 会忽略 `PYTHONHASHSEED`，正好把这层保险关掉。另外：**用来喂跨进程摘要的集合必须是字符串的集合**——小整数的哈希就是它自己，迭代顺序各进程都一样，**只有字符串元素才让"集合不排序"这个变异暴露出来**。
+    - **⚠️ 变异验证第一轮漏了四条，四条都补了测试（诚实记录）：**
+      | 变异 | 为什么第一轮没抓住 | 补了什么 |
+      |---|---|---|
+      | 去掉长度前缀 | 原用例的 `("ab","c")` vs `("a","bc")` **加不加前缀都不撞**（标签字节自己分开了）；真会撞的是**串内容以标签字节开头**的形状 | 换成 `("as","b")` vs `("a","sb")` |
+      | 键里不放 `prompt` | 原 `test_decide.py` 里没有"只改 prompt"的路径（prompt 的输入全在键里了） | 加"改模板必须重新问模型"——模板文字**只**通过渲染后的字节进键 |
+      | `save()` 行不排序 | 原用例存的是**同一个对象两次**，插入顺序当然一样 | 加"同内容、不同插入顺序 ⇒ 逐字节相同" |
+      | `prefix_for` 取第一个匹配 | 原用例里最长前缀恰好**排在最后**，"取最后一个"照样对 | 加三层嵌套用例（最长那个在排序里不落在两端） |
+    - **顺带更正**：`tests/unit/test_isolation.py` 由 28 条增至 **31** 条——新增 `src.agent` 的导入图、评分层前缀黑名单、以及一条**`src.agent` 不许能联网**（`socket` / `ssl` / `http.client` / `urllib.request` 一个都不许被拖进来）。最后一条防的是"顺手 `import requests` 兜个底"：那会让**回放**在一份不完整的缓存上悄悄联网（见 `decide.py` 的离线回放模式），而报告里写着它是复现。
 - [ ] **T6 (P1, human: ~2d / CC: ~2h)** — `src/baselines/` — B1–B5，B5 按 6SEVEN online alias detection 实现
   - Surfaced by: Step 0 [Layer 1] 发现 6SEVEN；以及 B5 公平性协议
   - Files: `src/baselines/b1..b5.py`
@@ -1445,6 +1478,10 @@ class Oracle:                # runner 侧持有，策略进程拿不到（进程
   - Verify: **禁止 `subprocess`**、**禁止直接网络访问**、**禁止读决策缓存**、**禁止读 `config/`**；用子进程边界时，断言策略进程无法构造 `GroundTruth`
   - **v6：任务缩窄了——接口拆分与进程边界断言已并入 T2。** 本任务现在只剩两部分：**(a) A2 的执行沙箱**（一等交付物，见「能力隔离」段），**(b) `tests/test_isolation.py` 进 CI**。这样拆的理由：**T2 就在写 `src/adapter/`，而隔离是接口的固有属性**——把它挂在 T10 意味着接口先落地、隔离后补，**中间那段时间里两次实验都可能跑在同一个进程里**，而那是「整组实验作废」级别的失误。**隔离跟接口同一条提交。** 沙箱是另一件事（A2 专用，只有它会执行生成的代码），留在 T10。
   - **配置黑名单（v6）**：`config/` 必须在读路径黑名单上——**它是真值的一方**（Punching Bag 的 JSON config 就是 `GroundTruth` 的来源，见 T3）。Verify 追加一条单测：**子进程读 `config/` 必须失败**。
+  - **v7 追加（2026-10-09，由 T5 递过来三件）**：
+    1. **🔴 一条此前没有任何落点的接口约束**：数据流图把**决策缓存画在 runner 进程里**，而同一张图的第 ③ 条边与 `## 约束` 段的沙箱规则都写着「策略进程不得读决策缓存文件本身」。**两处合起来的意思是 `DecisionCache` 是能力、不是许可**——T5 交付了能力（`src/agent/cache.py`），**许可与路径归 T10**。若要走 stdio 搬查询，得动 `protocol.CLIENT_VERBS`（白名单，加动词必须同步 `PROTOCOL_VERSION`），那是 T2 的协议面。**T5 之前这条约束在文档里一个落点都没有**，现在写在 `cache.DecisionCache` 的 docstring 与 `src/agent/__init__.py` 的模块 docstring 里。
+    2. **`src/agent/` 也进 D7 的导入图断言**：`surface` 干净不代表 `agent` 干净——两者是策略进程里两条独立的导入路径。T5 在 `tests/unit/test_isolation.py` 新增 `TestAgentImportGraph` 三条：`src.agent` 不得拖进真值/runner 侧、不得拖进**整个 `src.scoring`**（前缀匹配，不是列名字）、**不得拖进任何网络客户端**（`socket` / `ssl` / `http.client` / `urllib.request`；最后一条防的是"顺手 `import requests` 兜个底"，那会让**回放**在一份不完整的缓存上悄悄联网）。**本任务 Verify 里那几条黑名单，往 `src/agent/` 上加时照抄这个形状。**
+    3. **路径更正**：上面 Files 写的 `tests/test_isolation.py` 实际在 **`tests/unit/test_isolation.py`**（`pyproject.toml` 的 `testpaths = ["tests"]`，单测进 hosted CI、集成测试用 marker 排除）。该文件现 **31** 条。
 - [ ] **T11 (P1, human: ~1d / CC: ~1h)** — `src/scoring/stats.py` — **配对检验 + 多重性校正 + 分布报告**
   - Surfaced by: 评审 D8 — outside voice #8（CI 不重叠 ≈ p<0.005，制造假阴性；浪费同 seed 配对）
   - Files: `src/scoring/stats.py`, `src/scoring/report.py`
@@ -1458,6 +1495,7 @@ class Oracle:                # runner 侧持有，策略进程拿不到（进程
   - Surfaced by: 评审 D10 — outside voice #10（配置未定则主终点含义悬空、任务可能退化）
   - Files: `config/stage1_config.json`, `src/baselines/b0_probe_all.py`
   - Verify: B0 单独跑一遍；若 B0 接近最优则触发退化警报，重设 config
+  - **v7 追加：config 里还必须有 LLM 身份六项。** T5 把 `:588` 实例化成了一个硬检查（`src/agent/decide.py::LLM_IDENTITY_KEYS`：`model` / `model_version` / `temperature` / `top_p` / `max_tokens` / `call_date`）——**缺任一项 `decide()` 直接拒，且在任何模型调用之前判断**。这份 config 是**唯一**的填充处，所以 `config/stage1_config.json` 里这六项是**必填，不是可选元数据**。注意它与上面四个字段不是一回事：那四个管**实验的口径**（预算、epoch、上限），这六项管**这份缓存对应哪次调用**——`:592` 的可复现性边界（「以随包发布的缓存为界」）就架在这六项上。**另**：`config` 是**整份**进缓存键的（`cache.py`，不做字段白名单），所以这份文件里**任何一个**改动都会让缓存全量未命中——这是刻意的（见 T5 的 v7 判断），不是缺陷。
   - **v6 追加四个必填字段（`W` / `epoch_size` / `api_cost_cap` 与挂钟上限）**——`:431` 此前把 `epoch_size` 写成"**例如**每 100 次"，`W` **在全文没有任何取值**，而 `:460`/`:563` 已经写着「**总附加时间 = epoch 数 × W**」。**一个依赖两个未定值的算式，等于没有上限**：冒烟表 45,000 包，按 1 s/包串行算是 **12.5 小时**，而 `epoch_size` 取 10 的话光排空窗口就是 12.5 小时**又一遍**。
     - `epoch_size`：**写死一个数**，删掉"例如"。
     - `W`：**写死一个数**，且**定义为排空上限 + 一旦在途集合为空即提前退出**（不是固定等满）。
