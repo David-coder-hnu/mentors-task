@@ -6,7 +6,7 @@
 
 > ### ⚠️ 当前状态：早期研究阶段，**没有任何实验结论**
 >
-> - 20 个实现任务完成 **8** 个（T1–T5、T10、T13、T20）—— 完成的是**靶场适配层、真值层、评分器、决策缓存、执行沙箱与实验编排层**，即"能跑实验的地基"。**地基已合龙，但冒烟表还差一条种子通道**（见 `T20` 完成块）：今天 `B0` 能真跑，`B1/B4/M1/M2` 还跑不了。
+> - 20 个实现任务完成 **9** 个（T1–T5、T6a、T10、T13、T20）—— 完成的是**靶场适配层、真值层、评分器、决策缓存、执行沙箱、实验编排层与两条 Stage 1 基线**（`B1` 均匀随机、`B4` 响应率自适应 bandit），即"能跑实验的地基"。**种子通道已通**（T6a，走握手，协议 v1→v2）：今天 `B0` / `B1` / `B4` 三行都跑得起来，且同 seed 重跑逐前缀相同；`M1`/`M2` 还跑不了——卡的不是通道，是它们的**行为定义还没写进设计文档**（T6c 的第一件事）。
 > - **Agent 是否更好，是一个尚未开始检验的假说。** 本仓库目前没有任何一行数据支持或反对它。
 > - 所有已发表的、写进设计文档的判断，凡涉及"Agent 会赢/不会赢"，都是**设计选择**，不是测量结果。
 
@@ -71,7 +71,7 @@ Makefile                        本地入口（门 1 条件 2 的 netns 半边�
 config/stage1_config.json       Stage 1 的配置规格 —— 同时就是 Stage 1 的真值
 src/
   adapter/                      靶场适配层：ProbeSurface / Oracle 分离，进程边界，执行沙箱
-  baselines/                    基线策略（B0–B5）
+  baselines/                    基线策略（B0–B5；Stage 1 已交付 B0 / B1 / B4）
   agent/                        Agent 决策层：状态规范化 + 决策缓存 + LLM 决策体
   scoring/                      可回放评分器
   experiment/                   实验编排层：策略 × seed 的矩阵 + 一键复现入口
@@ -98,7 +98,7 @@ python -m venv .venv
 .venv/Scripts/python.exe -m pip install pytest      # Windows
 # .venv/bin/python -m pip install pytest            # Linux / macOS
 
-.venv/Scripts/python.exe -m pytest                  # 510 passed, 7 skipped（2026-10-10）
+.venv/Scripts/python.exe -m pytest                  # 576 passed, 7 skipped（2026-10-10）
 ```
 
 跑一次实验（一条命令，零参数即用 `config/stage1_config.json` 跑 B0）：
@@ -107,7 +107,7 @@ python -m venv .venv
 .venv/Scripts/python.exe -m src.experiment --offline --seeds 0-2
 ```
 
-`--offline` 是**排练靶场**（不出网卡、只按 `aliased` 前缀合成回包），用来验证编排链路本身；**由它得出的数不进入报告**。去掉 `--offline` 走真靶场，但需要 Linux + `CAP_NET_RAW`，且目前只有 `B0` 一行跑得起来——`B1/B4/M1/M2` 缺一条「可复现随机源进子进程」的通道，那是 `T6a` 的接口决定。
+`--offline` 是**排练靶场**（不出网卡、只按 `aliased` 前缀合成回包），用来验证编排链路本身；**由它得出的数不进入报告**。去掉 `--offline` 走真靶场，但需要 Linux + `CAP_NET_RAW`。**能跑的行**：`B0` / `B1` / `B4`（`--strategy src.baselines.b1_uniform_random:run`，同 seed 重跑逐前缀相同——种子走握手，见 `T6a` 完成块）；`M1`/`M2` 还不行，它们连**行为定义**都还没有（`T6c` 的第一件事）。
 
 本地目标（`make help` 列全部）：
 
@@ -116,7 +116,7 @@ make test          # 单测（hosted CI 跑的就是这一条）
 make smoke-table   # ⚠️ 冒烟表的真靶场实跑 —— 今天会拒绝并列出缺什么
 ```
 
-`make smoke-table` 是门 1 条件 2 的 netns 半边。它**今天不能跑**：靶场还没按 Stage 1 的 config 起、缺一个宿主侧编排脚本、`B1/B4/M1/M2` 缺种子通道——**它宁可炸，也不返回一张看起来完整的表。**（`Makefile` 需要 Linux 上的 `make`；本仓库的开发机是 Windows 且没装 `make`，所以它尚未在开发机上执行过，详见设计文档文末 T20 完成块第八节。）
+`make smoke-table` 是门 1 条件 2 的 netns 半边。它**今天不能跑**：靶场还没按 Stage 1 的 config 起、缺一个宿主侧编排脚本、`M1/M2` 缺行为定义（**种子通道那一条已由 `T6a` 补齐**，2026-10-10）——**它宁可炸，也不返回一张看起来完整的表。**（`Makefile` 需要 Linux 上的 `make`；本仓库的开发机是 Windows 且没装 `make`，所以它尚未在开发机上执行过，详见设计文档文末 T20 完成块第八节。）
 
 集成测试需要 Linux + `CAP_NET_RAW` + 一个在跑的靶场，在宿主上直接跑会 **skip**（Windows 建不了 ICMPv6 原始套接字）——这正是设计要的语义：单测进 hosted CI，集成测试用 marker 排除。
 
