@@ -27,11 +27,34 @@ v5 删掉「类型边界 + `hasattr` 断言」之后，隔离唯一还能被自�
 副本不会影响评分——**权威账本在 runner 侧**（`v6 (d)`）。捎带而不是按包查询，
 是因为 `v6 (d)` 明令「不按包查询」：那会把并发池重新串行化。捎带连一次额外
 往返都不花。
+
+## 种子从哪来、为什么**不**另开一条通道（T6a）
+
+`seed` 是 T6a 定下的接口决定，它和 `prefixes`、预算视图走的是**同一条**路：
+握手。备选是「runner 用 `spawn_strategy(extra_env=...)` 把种子塞进环境变量」，
+它更便宜（不动协议、不动版本号），但**被否掉了**，理由不是洁癖：
+
+1. **握手会拒绝，环境变量不会。** `PROTOCOL_VERSION` 从 2 起把「发不发种子」
+   变成握手的一部分（`strategy_child._hello` 版本不匹配即 `SystemExit`）；
+   环境变量漏设的现场是子进程里一句 `KeyError` 或**一个静默的默认值**，
+   而两者都发生在策略跑到一半的时候。
+2. **会话参数只有一条路。** `prefixes` 与预算视图已经在握手上了；给同一类
+   信息再开一条进程级的旁路，等于把「一次运行是怎麼配起来的」拆成两处看。
+3. **它在 ① 条边上可审计。** `tests/unit/test_isolation.py::TestEdgeOne` 对
+   **服务端实际发出去的字节**下断言，所以「种子送出去了、真值没送出去」这条
+   正反双断言落在同一个地方；走环境变量的话这条边上看不见它。
+
+代价写在 `protocol.TRUTH_KEYS` 旁边：`seed` 是 ① 条边上**第二个**刻意不进黑名单
+的字段（第一个是 `prefixes`），所以那条禁令的例外从一个变成两个，**每一处都要
+有测试**。另一条代价记在设计文档的 T6a 完成块里：策略知道了配对种子，在 Stage 2
+靶场状态由 seed 决定时就可能反推真值——那**不是这条通道能修的**（种子空间只有
+30 个数，任何派生子都在枚举下可逆），它归 T15 的 `RouterShim`。
 """
 
 from __future__ import annotations
 
 import ipaddress
+import random
 from collections.abc import Callable, Sequence
 from typing import Any, TypeVar
 
@@ -85,6 +108,9 @@ class ProbeSurface:
             `strategy_child` 负责，因为那是「子进程启动」的事，不是接口的事。
         budget_left: 握手回复里带回来的**初始预算视图**。**必须由
             `strategy_child` 传进来，不能省**——见下面那条。
+        seed: 握手回复里带回来的**会话种子**（T6a / 协议 v2）。与 `prefixes`
+            同属**任务陈述**那一类：它是这次运行的一组参数，不是前缀的属性。
+            见 `seed` 属性与 `protocol.TRUTH_KEYS` 上方那段。
     """
 
     # ── 为什么 `budget_left` 是个构造参数（T13 的接口发现）──────────────────
@@ -107,15 +133,26 @@ class ProbeSurface:
         channel: LineChannel,
         *,
         budget_left: int | None = None,
+        seed: int,
     ) -> None:
+        """
+        `seed` **必填、无默认值**（T6a / 协议 v2）：它由握手带回来，是这套实验里
+        每一个需要随机源的行（B1/B4/M1/M2/A1/A2）唯一的可复现依据。漏传的唯一
+        替代写法是猜一个，而两种猜法都静默：猜固定值会让所有 seed 跑出同一条
+        轨迹，猜 `None` 会让 `rng()` 退化。这与 `SurfaceServer.sampler` 必填
+        是同一条原则（V6-9）——**漏传必须炸**。
+        """
         if not prefixes:
             raise ValueError("prefixes 不能为空——没有任务范围就不是一次实验")
+        if not isinstance(seed, int) or isinstance(seed, bool):
+            raise TypeError(f"seed 必须是整数，得到 {seed!r}")
         self._networks = tuple(ipaddress.ip_network(p, strict=False) for p in prefixes)
         #: 去重后的前缀列表，原样保留给策略读（它是任务陈述，不是真值）。
         self.prefixes: tuple[str, ...] = tuple(dict.fromkeys(prefixes))
         self._channel = channel
         self._next_id = 0
         self._budget_left: int | None = budget_left
+        self._seed = seed
 
     # ── 探测 ────────────────────────────────────────────────────────────
 
@@ -179,6 +216,37 @@ class ProbeSurface:
         「策略能不能改自己的预算」这件事根本没有代码路径。
         """
         return self._budget_left
+
+    @property
+    def seed(self) -> int:
+        """这次会话的种子。**策略侧唯一的可复现随机源**（T6a / 协议 v2）。
+
+        它**不是真值**，而且这个区别是承重的——见 `protocol.TRUTH_KEYS` 上方
+        那段：与它同名近似的 `seed_map`（在表里）是「哪个前缀公布了哪些种子
+        地址」，那是答案；`seed` 只是一个让随机源可复现的整数。
+
+        做成只读属性而不是可写字段，理由与 `budget_left` 一样：改它不影响
+        任何东西（runner 侧那份才是权威），但可写字段会让「策略以为自己换了
+        seed」这件事有代码路径。
+        """
+        return self._seed
+
+    def rng(self) -> random.Random:
+        """**这次会话的随机源。** 每个需要随机性的策略都从这里取，不要另起。
+
+        三条规矩，各自都对应一种会静默的写法：
+
+        1. **只用 `rng.random()`**，不用 `randrange` / `shuffle` / `sample`。
+           Python 只保证 `random()` 那条序列跨版本不变（生成器与 seeding 兼容性
+           是官方保证的），`randrange` 之类**不保证**——用它会让「同 seed 重跑
+           逐包相同」在升一次 Python 之后悄悄失效。
+        2. **每次调用返回一个新的 `Random`**：同一个 seed 与同一个调用序列给出
+           同一条序列，所以「策略按什么顺序取随机数」是可复现的，而不是取决于
+           谁先调了它。
+        3. **它不是靶场的随机源。** 靶场的状态归 `Oracle.reset_target(seed)`
+           （runner 侧）；这里给的是**策略自己那份**，改不了靶场。
+        """
+        return random.Random(self._seed)
 
     # ── 内部 ────────────────────────────────────────────────────────────
 

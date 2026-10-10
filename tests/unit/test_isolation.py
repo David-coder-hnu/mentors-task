@@ -5,7 +5,7 @@ D7 的强制手段是**进程边界**，理由是 `:389`：v5 删掉了「类型
 是平凡的，而 A2 的全部卖点就是它写代码。
 
 **于是问题变成：删掉 `hasattr` 之后，隔离靠什么被自动验证？** 这个文件是答案。
-四条断言，各自防一类失效：
+六条断言，各自防一类失效：
 
 | 断言 | 防的是 |
 |---|---|
@@ -15,6 +15,12 @@ D7 的强制手段是**进程边界**，理由是 `:389`：v5 删掉了「类型
 | `TestBudgetIsNotLocal` | 策略改自己那份预算视图就能影响评分（`v6 (d)`） |
 | `TestHandshakeCarriesTheBudget` | 握手送出来的初始预算被**静默丢掉**（T13 写 B0 时撞到） |
 | `TestTheSandboxIsOnTheRealChild` | 进程边界只挡住**对象**，没挡住磁盘上的 `config/`（T10） |
+
+> **T6a 在这张表上留了两条边。** 会话种子走握手（`SurfaceServer(seed=…)` →
+> `result["seed"]` → `ProbeSurface(seed=…)`），而它是 ① 条边上**第二个**
+> 刻意不进黑名单的字段。于是 `TestEdgeOne` 里同时有两条方向相反的断言：
+> **种子必须发出去**（否则 B1/B4 拿不到可复现的随机源），**真值必须不发**。
+> 两条都在同一个类的同一批帧上，因为一处「加个字段」的改动会同时动到它们。
 
 > **为什么非得跑真子进程。** `MemoryChannel` 里两边互相都 import 得到——
 > 在那里断言「拿不到真值」，测到的是「我们没写错」，不是「边界在那儿」。
@@ -45,6 +51,11 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 PREFIX = "2001:db8:dead::/64"
 IN_RANGE = "2001:db8:dead::1"
 OUT_OF_RANGE = "2001:db8:0bad::1"
+
+#: 握手必须送出来的会话种子（T6a / 协议 v2）。**刻意不是 0**：0 是「没设」
+#: 那个默认值的形状，用它做常量会让「runner 忘了传、于是发了默认的 0」与
+#: 「runner 正确传了」在断言里长得一样。
+SEED = 20261010
 
 
 # ── 假件 ────────────────────────────────────────────────────────────────────
@@ -81,6 +92,7 @@ def make_server(**kwargs) -> SurfaceServer:
         ledger=BudgetLedger(100),
         sampler=lambda prefix, n: [f"{prefix.rstrip(':')}::{i:x}" for i in range(1, n + 1)],
         prefixes=[PREFIX],
+        seed=SEED,
     )
     options.update(kwargs)
     return SurfaceServer(**options)  # type: ignore[arg-type]
@@ -89,7 +101,10 @@ def make_server(**kwargs) -> SurfaceServer:
 def make_wired(server: SurfaceServer) -> tuple[ProbeSurface, MemoryChannel]:
     """接上一对 (surface, channel)；channel 里留着服务端发过的每一帧。"""
     channel = MemoryChannel(on_request=server.handle)
-    return ProbeSurface([PREFIX], channel.client_side()), channel
+    return (
+        ProbeSurface([PREFIX], channel.client_side(), seed=server.seed),
+        channel,
+    )
 
 
 def make_surface(server: SurfaceServer | None = None) -> ProbeSurface:
@@ -330,6 +345,51 @@ class TestEdgeOne:
         assert frame["ok"] and frame["result"]["prefixes"] == [PREFIX]
         assert "aliased" not in json.dumps(frame)
 
+    def test_the_hello_frame_carries_the_seed(self) -> None:
+        """**正反双断言**：种子必须发出去，真值必须不发（T6a 的代价）。
+
+        `seed` 是 ① 条边上第二个刻意不进 `TRUTH_KEYS` 的字段，所以
+        `test_a_full_session_never_puts_truth_on_the_wire` 那条黑名单扫描
+        **永远查不出它**（它本来就不该被查出）。那条扫描能证「没夹带真值」，
+        证不了「种子真的送到了」——**只有这一条能**。
+
+        两条断言的形状对应两种失效：缺了 `seed` 会让 B1/B4 拿不到可复现的
+        随机源（`strategy_child._hello` 会当场 `SystemExit`），而多发一个
+        真值字段会让整组实验作废。它们必须一起红或一起绿。
+        """
+        server = make_server()
+        frame = server.handle({"id": 0, "verb": "hello", "args": {}})
+        assert frame["result"]["seed"] == SEED, (
+            "握手没有把会话种子送出来——B1/B4/M1/M2 的随机源就没有依据了"
+        )
+        # 反方向：同一个帧里不得有真值。种子**不是**真值的依据见
+        # `protocol.TRUTH_KEYS` 上方那段（`seed` vs `seed_map`）。
+        protocol.assert_no_truth_keys(frame, where="握手帧")
+        assert "seed_map" not in json.dumps(frame), (
+            "`seed_map` 是答案，它绝不该出现在这一帧上"
+        )
+
+    def test_the_denylist_does_not_cover_the_seed(self) -> None:
+        """黑名单**不拦** `seed` —— 把这件事本身钉住，免得有人"顺手"加进去。
+
+        与上面那条是一对：上面用正向断言证明种子送出去了，这条证明
+        黑名单**故意**不管它。两条一起才说明得了「`seed` 在 ① 条边上是
+        **合法**的例外」，而只留上面那条的话，这里就不是一条刻意的空档，
+        只是**还没人想到要拦**。
+
+        它守的是什么：把 `seed` 加进 `TRUTH_KEYS` 读起来像对的一条禁令
+        （「种子」听着就像答案），代价却是 B1/B4 在**握手上**就 `SystemExit`
+        ——一次跑不起来、却指向「协议版本不对」的失败。下面的
+        `assert_no_truth_keys` **不得抛**，就是那条禁令的反面。
+
+        `seed_map` 仍是真值，必须继续被拦：两者只差一个后缀，这条断言是
+        唯一把「为什么一个是一个不是」写进测试的地方。
+        """
+        assert "seed" not in protocol.TRUTH_KEYS
+        protocol.assert_no_truth_keys({"result": {"seed": SEED}})  # 不抛
+        with pytest.raises(TruthLeak, match="seed_map"):
+            protocol.assert_no_truth_keys({"result": {"seed_map": {PREFIX: []}}})
+
     def test_a_rate_field_would_be_caught_by_the_denylist(self) -> None:
         """黑名单要有牙：`*_rate` 必须被拦下。"""
         with pytest.raises(TruthLeak, match="response_rate"):
@@ -411,6 +471,12 @@ def run(surface):
     found = []
 
     # 路 1：从交给我的对象上摸
+    #
+    # **`seed` 刻意不在这张名单里**（T6a）：它是这次会话的种子，与 `prefixes`
+    # 同属任务陈述那一类，`surface.seed` 是**应该**存在的只读属性（B1/B4/M1/M2
+    # 的随机源由它派生）。把它加进来，「够到 `surface.seed`」会被记成一次
+    # 越权，而那不是越权——是一条永远为真的假警报。真值的关键词是
+    # `seed_map`（在名单里），它问的是「哪个前缀公布了哪些种子地址」，那是答案。
     for name in ("ground_truth", "truth", "oracle", "seed_map", "topology", "_truth"):
         if hasattr(surface, name):
             found.append(f"surface.{name}")
@@ -625,12 +691,15 @@ class TestHandshakeCarriesTheBudget:
     """
 
     def test_the_surface_knows_the_budget_before_the_first_probe(self) -> None:
-        surface = ProbeSurface([PREFIX], MemoryChannel().client_side(), budget_left=7)
+        surface = ProbeSurface(
+            [PREFIX], MemoryChannel().client_side(), budget_left=7, seed=SEED
+        )
         assert surface.budget_left == 7, "构造参数没被接上"
 
     def test_the_surface_still_defaults_to_unknown(self) -> None:
         """不给就是 `None` —— **不猜一个默认值**（猜错的两种方向都是静默失败）。"""
-        assert ProbeSurface([PREFIX], MemoryChannel().client_side()).budget_left is None
+        surface = ProbeSurface([PREFIX], MemoryChannel().client_side(), seed=SEED)
+        assert surface.budget_left is None
 
     def test_hello_returns_the_whole_reply_not_just_its_result(self) -> None:
         """预算挂在 `Reply.budget_left` 上，**不在 `result` 里**。
@@ -650,6 +719,64 @@ class TestHandshakeCarriesTheBudget:
             "预算不该藏在 result 里——它是 Reply 的字段，测试要盯的就是这一点"
         )
         assert reply.budget_left == 5, "握手没把权威账本的初始值带回来"
+
+
+# ── 种子的策略侧那一半：`ProbeSurface.rng()`（T6a）───────────────────────────
+
+
+class TestTheRandomSource:
+    """握手把种子**送到**了，这是 `TestEdgeOne` 那两条的事；这里测它**到了之后**
+    长成什么样。
+
+    这一节的存在理由是一次变异检验：B1/B4 的「`rng()` 只调一次、把返回的
+    `Random` 接住」那条规矩，靠 `plan_counts(prefixes, budget, rng)` 这个签名
+    **结构上就犯不了**（它拿到的是 `Random`，不是 surface，没法在循环里回调），
+    所以把它改坏得不到一个能红的测试。**但那条规矩之所以必要，全在于
+    `rng()` 每次给一个新的 `Random`**——若它返回一个共享对象，反复调就对了，
+    规矩变成一句空话。后者才是可观测的，测在这里。
+    """
+
+    def _surface(self, seed: int = SEED) -> ProbeSurface:
+        return ProbeSurface([PREFIX], MemoryChannel().client_side(), seed=seed)
+
+    def test_it_is_seeded_by_the_session_seed(self) -> None:
+        """同一个 seed ⇒ 同一条序列，而且是 `random.Random`（不是别的什么）。"""
+        import random
+
+        first = self._surface(seed=7).rng()
+        second = self._surface(seed=7).rng()
+        assert isinstance(first, random.Random)
+        assert [first.random() for _ in range(5)] == [second.random() for _ in range(5)]
+
+    def test_different_seeds_give_different_streams(self) -> None:
+        """反方向。没有这一条，一个「恒 `Random(0)`」的实现也能过上面那条
+        ——而它会让「不同 seed 的会话」共享同一条随机轨迹。"""
+        assert self._surface(seed=1).rng().random() != self._surface(seed=2).rng().random()
+
+    def test_every_call_returns_a_fresh_object(self) -> None:
+        surface = self._surface()
+        assert surface.rng() is not surface.rng(), (
+            "两次 `rng()` 给了同一个对象——共享状态会让「谁先取随机数」影响"
+            "别人取到什么，而那正是第 2 条规矩要排除的"
+        )
+
+    def test_calling_rng_per_draw_would_restart_the_sequence(self) -> None:
+        """**这条是「接住一次」那条规矩的可观测后果。**
+
+        在循环里反复调 `rng()` 不是「接着取下一个数」，而是**每次都从序列头开始**
+        ——于是所有随机数都相同。这个失败**不会报错**：策略照跑、预算照花完，
+        只是分配退化成常量。所以它得有一条会红的断言盯着。
+        """
+        surface = self._surface()
+        rng = surface.rng()
+        proper = [rng.random() for _ in range(4)]
+        assert len(set(proper)) == 4, "同一个 `Random` 连取 4 次不该重复"
+
+        restarted = [surface.rng().random() for _ in range(4)]
+        assert restarted == [proper[0]] * 4, (
+            f"每次 `surface.rng()` 拿到的是 {restarted}——若它不等于「四个相同值」，"
+            "说明 `rng()` 返回的不是新对象，「接住一次」那条规矩就失去意义了"
+        )
 
 
 # ── ⑤ 沙箱：进程边界之外的**第二道**（T10 / D7）─────────────────────────────
@@ -916,7 +1043,25 @@ class TestSurfaceScope:
 
     def test_empty_prefix_list_is_refused(self) -> None:
         with pytest.raises(ValueError, match="prefixes 不能为空"):
-            ProbeSurface([], MemoryChannel().client_side())
+            ProbeSurface([], MemoryChannel().client_side(), seed=SEED)
+
+    def test_the_seed_is_mandatory_and_must_be_an_int(self) -> None:
+        """`seed` 漏传必须炸（T6a / 协议 v2），理由与 `sampler` 那条同源。
+
+        两种漏法都要炸，而且是**两种不同的炸法**，因为它们各自的绕开写法不同：
+
+        * 漏传 → `TypeError`（Python 签名），不许有默认值。给个默认值等于
+          「所有 seed 跑出同一条轨迹」——一场看起来跑成功了的假实验。
+        * 传了 `None` / `True` → `TypeError`（`__init__` 里的检查）。`bool` 单独
+          拦是因为 `isinstance(True, int)` 为真：不拦的话 `seed=True` 会静默
+          退化成 `seed=1`，与某个真实配对撞车。
+        """
+        with pytest.raises(TypeError):
+            ProbeSurface([PREFIX], MemoryChannel().client_side())  # type: ignore[call-arg]
+        with pytest.raises(TypeError, match="seed 必须是整数"):
+            ProbeSurface([PREFIX], MemoryChannel().client_side(), seed=None)  # type: ignore[arg-type]
+        with pytest.raises(TypeError, match="seed 必须是整数"):
+            ProbeSurface([PREFIX], MemoryChannel().client_side(), seed=True)
 
     def test_oracle_requires_both_collaborators(self) -> None:
         """漏接 T3 的导出或漏接重置回调，必须是 `TypeError` 而不是静默空真值。"""
@@ -926,11 +1071,36 @@ class TestSurfaceScope:
             Oracle(reset_target=lambda seed: None)  # type: ignore[call-arg]
 
     def test_sampler_is_mandatory(self) -> None:
-        """采样规则是策略要选的变量，不是接口的实现细节——漏传必须炸。"""
-        with pytest.raises(TypeError):
+        """采样规则是策略要选的变量，不是接口的实现细节——漏传必须炸。
+
+        `seed` 是**显式给上**的：不给的话这次 `TypeError` 也可能是在说种子，
+        而这条测试要钉死的是 `sampler`。两个必填参数共用一个异常类型时，
+        「谁必填」必须由调用点自己说清楚，否则删掉 `sampler` 的必填性，
+        这条测试照样绿。
+        """
+        with pytest.raises(TypeError, match="sampler"):
             SurfaceServer(  # type: ignore[call-arg]
                 executor=FakeExecutor(),
                 oracle=_oracle(),
                 ledger=BudgetLedger(10),
                 prefixes=[PREFIX],
+                seed=SEED,
             )
+
+    def test_the_server_seed_is_mandatory_and_must_be_an_int(self) -> None:
+        """runner 侧同理：**握手必须无条件发种子**，所以这里不能有"没传就不发"。
+
+        一支存在，就有一条能让 B1/B4 悄悄退化成不可复现的路径——而那种运行的
+        数看起来完全正常。
+        """
+        base = dict(
+            executor=FakeExecutor(),
+            oracle=_oracle(),
+            ledger=BudgetLedger(10),
+            sampler=lambda prefix, n: [],
+            prefixes=[PREFIX],
+        )
+        with pytest.raises(TypeError):
+            SurfaceServer(**base)  # type: ignore[arg-type]
+        with pytest.raises(TypeError, match="seed 必须是整数"):
+            SurfaceServer(**base, seed="2026")  # type: ignore[arg-type]

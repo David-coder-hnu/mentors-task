@@ -31,14 +31,24 @@
 这与失败模式表反复点名的那种形状是同一条：**静默**。所以失败要以
 `SessionFailed` 冒出来，而**不是**降级成「这次跑得不好」。
 
-## 种子今天**不**进子进程
+## 种子怎么进子进程（T6a 定夺，2026-10-10）
 
-`reset_target(seed)` 与 pool 的 `identifier` 都从 seed 派生，但**策略进程
-拿不到它**——`spawn_strategy` 的 `extra_env` 里没有种子这一项。理由是它
-属于一个**尚未定夺的接口决定**：B1(均匀随机) / B4(bandit) / M1 / M2 都需要
-一个可复现的随机源，而那条通道该走握手还是走环境变量，改的是 `T2` 的协议面
-（见 T6a）。**在定夺之前不先私自开一条**——一条"临时"通道一旦跑出数字，
-它就成了事实上的接口，而它没有经过任何评审。
+`reset_target(seed)` 与 pool 的 `identifier` 都从 seed 派生，**策略进程也拿到它**
+——经 `SurfaceServer(seed=…)` → 握手回复的 `result["seed"]` →
+`ProbeSurface(seed=…)`。B1(均匀随机) / B4(bandit) / M1 / M2 都需要一个可复现的
+随机源，而这是它们拿到种子的**唯一**一条路。
+
+这里此前写的是「种子今天不进子进程，因为那条通道是 T6a 尚未定夺的接口决定」。
+**T6a 已定夺：走握手，不走环境变量。** 三条理由（会拒绝 vs 会漏设、会话参数
+只有一条路、在 ① 条边上可审计）写在 `surface.py` 模块 docstring 的
+「种子从哪来」一节，代价写在 `protocol.TRUTH_KEYS` 旁边。协议版本因此从 1 升到
+**2**——一个 v1 的 runner 不会发种子，也会被 `_hello` 当场拒绝。
+
+**注意种子的两个用途在 runner 侧是分开的**：`reset_target(seed)` 重置的是
+**靶场**（Stage 1 是空操作，靶场没有由 seed 决定的状态——见 `driver._build_spec`），
+而交给策略的那一份是**策略自己的**随机源。Stage 2 的 `RouterShim` 两者都要用，
+而「策略知道了配对种子」这件事在 Stage 2 是一个**具名的**待办（种子空间只有 30
+个数，任何派生子在枚举下可逆），归 T15。
 """
 
 from __future__ import annotations
@@ -170,9 +180,10 @@ def run_session(
 
     Args:
         entry: 策略入口，形如 `"pkg.module:run"`。契约是 `run(surface) -> None`。
-        seed: 配对单位 `(config, seed)` 里的那个 seed（`:559`）。它派生两样东西
-            ——`reset_target(seed)` 与（真 executor 的）`identifier`——但**不
-            进子进程**，理由见模块 docstring。
+        seed: 配对单位 `(config, seed)` 里的那个 seed（`:559`）。它派生三样东西
+            ——`reset_target(seed)`、（真 executor 的）`identifier`，以及**交给
+            子进程的那一份随机源**（T6a：经 `SurfaceServer(seed=…)` 走握手，
+            见模块 docstring）。
         truth: 已经导出的真值。**它不进子进程**：`spawn_strategy` 只把
             `SurfaceServer` 接在 stdio 上，而 server 只经
             `protocol.assert_no_truth_keys` 过的帧说话。
@@ -198,6 +209,7 @@ def run_session(
         ledger=ledger,
         sampler=sampler,
         prefixes=prefixes,
+        seed=seed,
         timeout_s=timeout_s,
     )
 

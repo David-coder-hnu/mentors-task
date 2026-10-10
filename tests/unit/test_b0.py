@@ -250,6 +250,10 @@ class TestB0ThroughTheRealRunner:
     """
 
     BUDGET = 300
+    #: 这一对 `(策略, seed)` 的 seed（T6a / 协议 v2）。B0 不用随机源，但它仍
+    #: 必须走这条通道——握手**无条件**发种子，没有「这个策略不需要就不发」
+    #: 那一支（见 `SurfaceServer.__init__` 的 `seed` 参数）。
+    SEED = 0
 
     def _session(self):
         truth = stage1_truth_from_config(CONFIG_PATH)
@@ -261,6 +265,7 @@ class TestB0ThroughTheRealRunner:
             ledger=BudgetLedger(self.BUDGET),
             sampler=_sampler,
             prefixes=prefixes,
+            seed=self.SEED,
         )
         process = spawn_strategy(
             "src.baselines.b0_probe_all:run", server=server, cwd=str(REPO_ROOT)

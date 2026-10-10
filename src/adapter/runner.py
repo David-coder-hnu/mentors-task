@@ -93,6 +93,7 @@ class SurfaceServer:
         ledger: BudgetLedger,
         sampler: Callable[[str, int], Sequence[str]],
         prefixes: Sequence[str],
+        seed: int,
         timeout_s: float | None = None,
     ) -> None:
         """
@@ -101,10 +102,17 @@ class SurfaceServer:
             prefixes: 这次实验的任务范围。子进程握手时拿到的是它，`probe`/
                 `sample` 的目标必须落在它里面。**注意这里没有 `*_response_rate`
                 ——真值留在本进程**（设计方案 `:395` 的 (c) 条）。
+            seed: 这次会话的种子（T6a / 协议 v2）。**必填无默认值**，与 `sampler`
+                同一条原则：握手必须**无条件**把它送出去，所以这里不能有
+                「没传就不发」这一支——一支存在，就有一条能让 B1/B4 悄悄变成
+                不可复现的路径。它同时是策略侧随机源的种子，但**不是靶场重置
+                用的那个**（后者由 `session.run_session` 调 `Oracle.reset_target`）。
             timeout_s: 只用于给子进程报一个信息性的预算口径，不参与判定。
         """
         if not callable(sampler):
             raise TypeError("sampler 必须是可调用对象")
+        if not isinstance(seed, int) or isinstance(seed, bool):
+            raise TypeError(f"seed 必须是整数，得到 {seed!r}")
         self.executor = executor
         self.oracle = oracle
         self.ledger = ledger
@@ -112,6 +120,7 @@ class SurfaceServer:
         self.prefixes = tuple(dict.fromkeys(prefixes))
         if not self.prefixes:
             raise ValueError("prefixes 不能为空")
+        self.seed = seed
         self.timeout_s = timeout_s
         #: `report()` 收到过的全部判定，按序。`aliased_caught` 的**唯一**来源
         #: （设计方案 `:488`）：评分器不得从行为里推断它。
@@ -150,7 +159,9 @@ class SurfaceServer:
     def _dispatch(self, request: Request) -> Any:
         args = request.args
         if request.verb == "hello":
-            return {"protocol": PROTOCOL_VERSION, "prefixes": list(self.prefixes)}
+            # `seed` 与 `prefixes` 同属**任务陈述**那一类，不是真值——理由写在
+            # `protocol.TRUTH_KEYS` 上方那段，本函数是它唯一的发出点。
+            return {"protocol": PROTOCOL_VERSION, "prefixes": list(self.prefixes), "seed": self.seed}
 
         if request.verb == "probe":
             dst = str(args["dst"])

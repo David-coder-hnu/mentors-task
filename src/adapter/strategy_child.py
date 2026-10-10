@@ -53,12 +53,18 @@ _HELLO_ID = 0
 
 
 def _hello(channel: LineChannel, timeout_hint: str = "") -> Reply:
-    """握手：拿任务范围与初始预算视图。
+    """握手：拿任务范围、初始预算视图与会话种子。
 
     **返回整条 `Reply`，不只 `result`。** 初始预算挂在 `Reply.budget_left` 上，
     而不是 `result` 里——只要 `result`，那份预算是被静默丢掉的，于是策略在
     第一次探测之前读 `surface.budget_left` 会拿到 `None`（见 `ProbeSurface`
     `__init__` 里那条接口发现）。这是 T13 写 B0 时撞到的真缺口，不是洁癖。
+
+    种子的检查（T6a）与版本检查是**两件事，两条都留着**：版本号拦住「跑的是
+    v1 的 runner」，这一条拦住「版本号对、但 `result` 里没有这一格」。后者是
+    一次重构就可能造出来的（`_dispatch` 少写一个键），而它的现场是
+    `KeyError: 'seed'` 落在策略的 `run()` 里——报错的地方离出错的地方隔着
+    一次握手。这里当场说清楚。
     """
     channel.send(
         protocol.request_to_wire(Request(verb="hello", args={}, id=_HELLO_ID))
@@ -77,6 +83,15 @@ def _hello(channel: LineChannel, timeout_hint: str = "") -> Reply:
         raise SystemExit(
             f"协议版本不匹配：runner 说 {reply.result.get('protocol')}，"
             f"本进程是 {protocol.PROTOCOL_VERSION}"
+        )
+    seed = reply.result.get("seed")
+    if not isinstance(seed, int) or isinstance(seed, bool):
+        # 见本函数 docstring：这是版本检查**之外**的那一条。
+        raise SystemExit(
+            f"握手回复里的 seed 不是整数（得到 {seed!r}）——这个 runner 的 "
+            "`SurfaceServer._dispatch` 没有把种子送出来。B1/B4/M1/M2 都要靠它"
+            "复现；**不猜一个默认值**，因为猜出来的那次运行是不可复现的，"
+            "而它跑出来的数看起来完全正常。"
         )
     return reply
 
@@ -122,6 +137,9 @@ def main(argv: list[str] | None = None) -> int:
             # 把握手带回来的初始预算视图接上——不接的话它在第一次探测前是
             # `None`，而策略要在发第一个包之前就决定怎么花。见 `_hello`。
             budget_left=bootstrap.budget_left,
+            # 种子同理，而且它是**必填**的：`_hello` 已经保证它是个整数，
+            # 所以这一行没有「取不到」的支路。见 `ProbeSurface.__init__`。
+            seed=bootstrap.result["seed"],
         )
         run(surface)
         return 0
