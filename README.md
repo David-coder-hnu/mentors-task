@@ -6,7 +6,7 @@
 
 > ### ⚠️ 当前状态：早期研究阶段，**没有任何实验结论**
 >
-> - 19 个实现任务完成 **7** 个（T1–T5、T10、T13）—— 完成的是**靶场适配层、真值层、评分器、决策缓存与执行沙箱**，即"能跑实验的地基"。
+> - 20 个实现任务完成 **8** 个（T1–T5、T10、T13、T20）—— 完成的是**靶场适配层、真值层、评分器、决策缓存、执行沙箱与实验编排层**，即"能跑实验的地基"。**地基已合龙，但冒烟表还差一条种子通道**（见 `T20` 完成块）：今天 `B0` 能真跑，`B1/B4/M1/M2` 还跑不了。
 > - **Agent 是否更好，是一个尚未开始检验的假说。** 本仓库目前没有任何一行数据支持或反对它。
 > - 所有已发表的、写进设计文档的判断，凡涉及"Agent 会赢/不会赢"，都是**设计选择**，不是测量结果。
 
@@ -72,6 +72,7 @@ src/
   baselines/                    基线策略（B0–B5）
   agent/                        Agent 决策层：状态规范化 + 决策缓存 + LLM 决策体
   scoring/                      可回放评分器
+  experiment/                   实验编排层：策略 × seed 的矩阵 + 一键复现入口
 docker/                         Punching Bag 靶场容器（锁定上游 commit）
 scripts/                        吞吐标定与 sweep
 tests/unit/                     单测（进 hosted CI）
@@ -95,8 +96,16 @@ python -m venv .venv
 .venv/Scripts/python.exe -m pip install pytest      # Windows
 # .venv/bin/python -m pip install pytest            # Linux / macOS
 
-.venv/Scripts/python.exe -m pytest                  # 452 passed, 7 skipped（2026-10-09）
+.venv/Scripts/python.exe -m pytest                  # 510 passed, 7 skipped（2026-10-10）
 ```
+
+跑一次实验（一条命令，零参数即用 `config/stage1_config.json` 跑 B0）：
+
+```bash
+.venv/Scripts/python.exe -m src.experiment --offline --seeds 0-2
+```
+
+`--offline` 是**排练靶场**（不出网卡、只按 `aliased` 前缀合成回包），用来验证编排链路本身；**由它得出的数不进入报告**。去掉 `--offline` 走真靶场，但需要 Linux + `CAP_NET_RAW`，且目前只有 `B0` 一行跑得起来——`B1/B4/M1/M2` 缺一条「可复现随机源进子进程」的通道，那是 `T6a` 的接口决定。
 
 集成测试需要 Linux + `CAP_NET_RAW` + 一个在跑的靶场，在宿主上直接跑会 **skip**（Windows 建不了 ICMPv6 原始套接字）——这正是设计要的语义：单测进 hosted CI，集成测试用 marker 排除。
 

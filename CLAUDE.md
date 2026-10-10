@@ -10,7 +10,7 @@
 
 | 文件 | 说明 |
 |---|---|
-| `IPv6_Agent_探测_设计方案.md` | **唯一权威的设计文档（活文档，永远以它为准）**。2026-10-03 由 `/office-hours` 产出，经 3 轮对抗式评审 + **两次** `/plan-eng-review` 四段评审 + `/plan-ceo-review`（含 Outside Voice），**现为 v6**。核心决定：贡献是靶场 + 可回放评分器，Agent 是靶场上的被测对象。**v2**：发现 Punching Bag（IMC 2026）本身就是这类靶场，贡献拆两半。**v4**：P1 由「LLM vs RL」改写为「**开放 vs 封闭动作空间**」；Stage 2 由 fork 包路径改为 **Response 层 shim**；主终点由 `info_gain` 改为**可数量**；Stage 1 降为 Stage 2 的 harness 前置。**v5**：把 CEO review 的 22 条写回逐条落地（Stage 1 降为冒烟表、30 次比较的 Holm–Bonferroni、两个 co-primary 端点的判决规则、P1 的 2×2 杀死矩阵、A3 声明失效、缓存键加 config 哈希）。**v6**：第三次评审（`/plan-eng-review`，2026-10-08）验的是**「要求写了、交付物在不在」**——查出三处脱节并落地：族规模分母写死 **28**（不是 30，A3 已声明失效）+ 三级阶梯 28→30→36、新增 `T18` 交付**留出集**（门 2 条件 3 的原话是「不修就整个实验作废」却无任务交付它）、新增 `T6c` 补 `M1`/`M2` 的**行为定义**（冒烟表主比较的自变量原先只有半句标注）；critical gap 由 4 条涨到 **7 条且全部静默**。含 8 行基线表（B0–B5、A1–A3）、Stage 0–3 拆分、8 条 `Reviewer Concerns`、**T1–T19** 任务清单 |
+| `IPv6_Agent_探测_设计方案.md` | **唯一权威的设计文档（活文档，永远以它为准）**。2026-10-03 由 `/office-hours` 产出，经 3 轮对抗式评审 + **两次** `/plan-eng-review` 四段评审 + `/plan-ceo-review`（含 Outside Voice），**现为 v6**。核心决定：贡献是靶场 + 可回放评分器，Agent 是靶场上的被测对象。**v2**：发现 Punching Bag（IMC 2026）本身就是这类靶场，贡献拆两半。**v4**：P1 由「LLM vs RL」改写为「**开放 vs 封闭动作空间**」；Stage 2 由 fork 包路径改为 **Response 层 shim**；主终点由 `info_gain` 改为**可数量**；Stage 1 降为 Stage 2 的 harness 前置。**v5**：把 CEO review 的 22 条写回逐条落地（Stage 1 降为冒烟表、30 次比较的 Holm–Bonferroni、两个 co-primary 端点的判决规则、P1 的 2×2 杀死矩阵、A3 声明失效、缓存键加 config 哈希）。**v6**：第三次评审（`/plan-eng-review`，2026-10-08）验的是**「要求写了、交付物在不在」**——查出三处脱节并落地：族规模分母写死 **28**（不是 30，A3 已声明失效）+ 三级阶梯 28→30→36、新增 `T18` 交付**留出集**（门 2 条件 3 的原话是「不修就整个实验作废」却无任务交付它）、新增 `T6c` 补 `M1`/`M2` 的**行为定义**（冒烟表主比较的自变量原先只有半句标注）；critical gap 由 4 条涨到 **7 条且全部静默**。含 8 行基线表（B0–B5、A1–A3）、Stage 0–3 拆分、8 条 `Reviewer Concerns`、**T1–T20** 任务清单。**v9**（2026-10-10）：新增 **`T20`** —— 实验编排层（`src/experiment/`），把 CEO plan 的 **`C6`**「一键复现脚本」落成任务块（它进了门 1 的交付物清单与工时估算，却从来没有任何 T 编号）；并更正两处把「冒烟表真靶场实跑」误记为 `T16` 的地方（`:1517` 的 T16 是知识消融 A3，且当时 BLOCKED）。见文末 T20 完成块 |
 | `TODOS.md` | 推迟项清单（2026-10-03 建立）。**当前 7 条**：导师答复补录（P1）、池大小上界变成会红的检查（P2）、其余 5 个 TGA 基线（P3）、Linux mount namespace 沙箱（P3）、安装 `jq`（P3）、安装 Codex CLI（P3）、fork 回退预案（P4）。原「版权材料隔离」已**关闭**——升级为 Stage 0 交付物（门 0 条件 9） |
 | `docs/README.md` | **文档索引**。`docs/` 下分四层（`restricted/` 版权材料、`reports/` 调研报告、`plans/` 评审快照、`artifacts/` gstack 原始产出），按权威性排列；说明每个文件的用途与冲突裁决顺序 |
 | `docs/restricted/` | **版权材料，仓库必须保持 private**：6Seeks IEEE ToN 2025 原文 + 中文全文译读。将来开源原型代码前必须整目录剥离，由导出脚本断言（门 0 条件 9） |
@@ -20,7 +20,7 @@
 
 ## 代码（原型）
 
-- `src/` — 原型代码所在。四块：靶场适配层（**`ProbeSurface` / `Oracle` 必须分离**，见设计方案 D7）、基线策略集合（B0–B5）、Agent 决策层、可回放评分器。
+- `src/` — 原型代码所在。五块：靶场适配层（**`ProbeSurface` / `Oracle` 必须分离**，见设计方案 D7）、基线策略集合（B0–B5）、Agent 决策层、可回放评分器、**实验编排层**（`src/experiment/`，T20：`策略 × seed` 的矩阵 + 一键入口 `python -m src.experiment`；它读真值，所以**在策略侧的禁止导入表里**）。
 - **靶场路线已定稿**：Stage 1 复用 Punching Bag **原样**（不自建 `FakeNet`）；Stage 2 在其上加 `RouterShim`（Response 层合成，**不 fork 包路径**）。
 - 原型代码的目标是**做实验**，不是做产品：优先保证可回放（固定 seed、确定性响应、**状态规范化**）与 ground truth 可导出。
 - **两条硬约束**（违反则整组实验作废）：策略侧只能看到 `ProbeSurface`，**不得触及任何真值字段**；探测并发下 `state` 必须规范化，否则决策缓存永不命中。
