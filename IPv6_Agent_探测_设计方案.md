@@ -1524,14 +1524,14 @@ class Oracle:                # runner 侧持有，策略进程拿不到（进程
 
 - [ ] **T17 (P1, human: ~2h / CC: ~20min)** — `.github/workflows/test.yml` — **最小 CI pipeline**
   - Surfaced by: 架构 #5 —— `## Distribution Plan` 写「无 CI/CD 需求」，而 `## NOT in scope` 表写「有**两处必须进 CI**」，**同一份文档两句话直接打架，且没有任何任务负责建它**
-  - Files: `.github/workflows/test.yml`, `pyproject.toml`（或 `pytest.ini`）
+  - Files: `.github/workflows/test.yml`, `pyproject.toml`（或 `pytest.ini`）, **`Makefile`**（v9 增补 —— 门 1 条件 2 的 netns 半边就落在它身上，理由见本任务的「范围」行与文末 T20 块第九节）
   - Verify: **四条不可失败项必须全绿**，缺一条就是 CI 没起作用：
     1. **能力隔离**（D7 / T2(c)）——策略进程无法构造 `GroundTruth`
        > **v7：这一条已经有落点了（2026-10-08）**：`tests/unit/test_isolation.py`，**39** 条（v9 后：`FORBIDDEN` 补 `src.experiment` 时 +1，见文末 T20 块第七节），**全部是纯单测**（唯一的外部依赖是一个 `sys.executable` 子进程和 `tmp_path`），所以它**天然符合 T17「集成测试排除在外」的范围**——不需要 marker，跑 `pytest tests/` 就会带上它。`test_isolation.py::TestImportGraph` 与 `TestRealProcessBoundary` 是本条的主要内容。
     2. **`RouterShim` 契约**（D9 / T15）——合成 `src` 集合 == `GroundTruth.routers`
     3. **缓存键跨 `PYTHONHASHSEED` 稳定**（T5(b)）——两个 seed 值下键相等
     4. **日志侧包集合逐次相等**（判据 6(i)）——同一 config + 同 seed 两次 run 的包集合精确相等
-  - **范围**：跑 `pytest tests/`；**需要 netns / Docker 的集成测试用 skip 标记排除**（与「单测进 hosted CI、netns 留本地」的决定一致）。**不做通用 CI/CD 流水线**——这不是产品。
+  - **范围**：跑 `pytest tests/`；**需要 netns / Docker 的集成测试用 skip 标记排除**（与「单测进 hosted CI、netns 留本地」的决定一致）。**不做通用 CI/CD 流水线**——这不是产品。**（v9 增补：门 1 条件 2 的 netns 那一半也归本任务 —— 用户 2026-10-10 裁决「并进 T17」。落地处是 `Makefile` 的 `smoke-table` 目标，它今天**不能跑**，缺三样东西且缺哪一样都会让结果看起来正常：(1) 靶场没按 Stage 1 的 config 起（挂的是 T1 的 smoke 脚手架；这件事 T13 已具名记在 `:1780`，当时**没有归属**）；(2) 缺宿主侧编排脚本，形状与 `scripts/perf_sweep.py` 完全相同（起靶场 → 容器内跑编排层 → **停靶场** → 读账本，第三步不可省）；(3) 冒烟表 5 行里 4 行缺种子通道（归 `T6a`）。三条都写进了 Makefile 的拒绝信息里 —— 这个目标**大声拒绝，不返回一张看起来完整的表**。同时 `.gitattributes` 给它钉了 `eol=lf`：配方行以 TAB 开头，行尾的 `\r` 会被当成命令的一部分。见文末 T20 块第九节。）**
 - [ ] **T18 (P1, human: ~4h / CC: ~30min)** — `config/heldout/` + `scripts/make_heldout.py` — **留出集拓扑与配置生成**
   - Surfaced by: outside voice P1（v6 / D18）——CEO plan 门 2 条件 3 要求「留出集调参协议」，原话是「**这条不修就整个实验作废**」，**但全文检索「留出集 / held-out」只出现在那一条要求里**：没有任何任务产出过留出集。**要求写了，交付物不存在。**
   - Files: `config/heldout/*.json`, `scripts/make_heldout.py`, `tests/test_heldout_disjoint.py`
@@ -2018,16 +2018,18 @@ rows=2 wall_clock_s=0.75
 
 > **这就是这个仓库要变异检验的理由。** 那 9 条里 8 条本来就会红；**第 4 条绿了，而它绿得完全合理**——测试是绿的、断言是活的、只是它测的不是它名字说的那件事。**没有任何一次「跑一遍看看」会发现它。**
 
-### 六、没有解决的三件事（具名的，不是「以后再说」）
+### 六、没有解决的五件事（具名的，不是「以后再说」）
 
 1. **种子进子进程的通道** —— 归 **T6a**。它一旦定夺，B1/B4/M1/M2 才跑得起来，冒烟表的 150 趟才凑得齐（门 1 条件 1）。**本层不代做这个决定**，理由见第四节。
 2. **`CALIBRATED_POOL_CEILING = 512`（`real.py:33`）今天只是一个**文档里的数**。它引用 `docs/perf_baseline.md`，而那份文档确实存在；但**没有任何一处强断言 `max_in_flight ≤ 512`**——`--max-in-flight` 的 help 里写着「必须 ≤ 本环境标定的无丢包上界」，那**是一句话，不是一条检查**。这正是 `TODOS.md:43` 那条 P2（依赖 T13）说的东西，本次**没有**把它变红，也没有新增条目——条目已存在，落在 `real.py` 只是把它从「config 里还没有取值」推进到了「取值有了，检查还没有」。
 3. **门 1 条件 11 要的「实测总时长」目前只有排练靶场的数**（2 趟 0.75 s）。**这不是那条条件要的数**——它要的是冒烟表（150 趟、真靶场、真并发）的挂钟，而那个数**要等第 1 条解掉才有**。编排层能做的是**把它测出来而不是估出来**（`MatrixResult.elapsed_s` 与每行的 `elapsed_s` 都是实测），这一点已经做到。
+4. **靶场今天没有按 Stage 1 的 config 起。** `docker/compose.yml` 的 `target` 挂的是 `docker/smoke/punchingbag-smoke.json`——T1 的脚手架（两个前缀 `dead` / `0bad`），**不是** Stage 1 的 32 个 `/64`。要让冒烟表量的是 Stage 1，得从 `config/stage1_config.json` 生成一份 Punching Bag 的 `--json-config`，并给 `2001:db8:5::/48` 配路由。**这件事实话是 T13 已经具名记下的**（`:1780`：「要么改 `compose.yml`，要么新起一个 profile」），只是**当时没有归属**；本块第四节那张「能跑什么」的表因此要读成**「编排链路能跑什么」，不是「冒烟表能跑什么」**。归属已定：T17 的 netns 半边。
+5. **缺一个宿主侧编排脚本**（起靶场 → 容器内跑编排层 → **停靶场** → 读账本）。形状与 `scripts/perf_sweep.py` 完全一样，第 3 步不可省的理由也在那里（靶场 `packet_log.txt` 只在正常退出时 flush，活着读会读到截断文件，而那个假报**指向保守结论**，不会有人质疑）。同样归 T17 的 netns 半边。
 
 ### 七、与别的任务的接口影响
 
 * **T13 / `tests/unit/test_b0.py`**：**不受影响**。那 14 条仍走它自己的 `_session()` helper——本层没有改它，也没有反向依赖它。两者并存是刻意的：**测试 helper 证明「这条路通」，编排层负责「跑成一张表」**，合并它们会让单测依赖一个 150 趟的入口。
-* **T17（CI）**：本层 57 条是**纯单测**（唯一外部依赖是 `sys.executable` 起的子进程与 `tmp_path`），`pytest tests/` 直接带上，**不需要 marker**——与 `test_isolation.py` / `test_sandbox.py` 同一性质，符合 T17「集成测试排除在外」的范围。
+* **T17（CI）**：本层 57 条是**纯单测**（唯一外部依赖是 `sys.executable` 起的子进程与 `tmp_path`），`pytest tests/` 直接带上，**不需要 marker**——与 `test_isolation.py` / `test_sandbox.py` 同一性质，符合 T17「集成测试排除在外」的范围。**（v9 追加：T17 现在也是 `Makefile` 的归属方 —— 门 1 条件 2 的 netns 半边；见第九节。）**
 * **D7 / `TestAgentImportGraph.FORBIDDEN`**：`src.experiment` **进了策略侧的禁止导入表**。理由与 T10 那次补 `src.adapter.ground_truth` 是同一条：**名单靠「有没有一条实路」判，不靠惯例**。编排层要读 `config/` 导真值、要拿权威账本、要折分，所以它整层握着真值侧——而它**顺手好用**（一行就能跑一张表），正是「顺手 import 一下」最可能发生的地方。同时加了 `test_importing_the_experiment_layer_really_does_reach_the_truth`，**它是双向的**：若哪天有人把这层拆成「纯装配」与「真值部分」两层，那条会红，提醒回来把名不副实的那条禁令摘掉——**而不是留着让下一个人以为它挡着什么**。
 * **TODOS**：**无新增条目**。第六节第 2 条对应的那条 P2 已经存在。
 * **`README.md`**：状态行按仓库惯例同步为 **20 tasks / 8 done**。
@@ -2043,6 +2045,9 @@ rows=2 wall_clock_s=0.75
 | 全量套件 | **510 passed / 7 skipped**（T10 完成块记的是 452；差额 **58 = 57 + 1**） |
 | 变异检查 | **9 / 9 红**（未变异时基线全绿） |
 | 端到端 | `python -m src.experiment --offline --seeds 0-1` —— 真子进程 + 真账本 + 真折分 |
+| 新增（v9，归 T17） | `Makefile`（9 个目标）、`.gitattributes` 一行 `Makefile text eol=lf` |
+
+> **`Makefile` 的账要单独说一句：它没有在开发机上执行过。** 本机有 Docker 但没有 `make`（`make --version` → command not found），Docker 守护进程也没起，所以 9 个目标里**只有两条真正跑过**（`make test` 与 `make smoke-offline` 对应的命令本身跑过，不是 make 跑的）；另外两条配方依赖的命令在仓库里跑过（`docker compose … --profile harness`、`scripts/perf_sweep.py --help`）。已做的验证是**结构性的**：9 个目标全部在 `.PHONY` 里、33 条配方行全部以真 TAB 开头、文件是纯 LF（CRLF 会让 `make` 报 `Error 127`，看起来像命令不存在）。**它拼的是既有命令，没有新增语义——但「没跑过」这件事记在这里，不靠读者推断。**
 
 **这层没有引入任何第三方运行时依赖**——`src/experiment/` 只 import 仓库自己的模块与标准库。仓库「零运行时依赖」的性质不变。
 
@@ -2051,5 +2056,5 @@ rows=2 wall_clock_s=0.75
 门 1 条件 1 / 2 / 11 三条里，本层交付的是**入口**，不是**通过**：
 
 * 条件 1 要 5 行都跑通 —— **差 T6a 的种子通道**（第六节第 1 条）。
-* 条件 2 的 hosted 那一半，`pytest tests/` 今天就能跑（T17）；**netns 那一半要求走「本地 make 目标」，而仓库里没有 `Makefile`**。这件事**本次没有处置**，它是门 1 条件 2 的原文（`ceo-plan.md:251`）、CEO plan 自己的 Section 9A 决定（`:549`，选项 C）。**路由是 T17**，但它的 `Files`（`:1527`）只写了 `.github/workflows/test.yml` 与 `pyproject.toml`——**没有 `Makefile`**。按 T10 完成块第八节留下的那条先例（**记下来并指出路由，不擅自扩别人的 `Files`**），本次照办：这一条**留给用户裁**——是把 `Makefile` 并进 T17，还是另开一条。注意它在 T20 之前**根本无从写起**（没有可调的一键入口），现在有了。
+* 条件 2 的 hosted 那一半，`pytest tests/` 今天就能跑（T17）；**netns 那一半要求走「本地 make 目标」**。**（v9，2026-10-10 —— 用户裁决「并进 T17」，`Makefile` 已落地。）** 路由原本只是「应当是 T17」：它的 `Files`（`:1527`）当时只写了 `.github/workflows/test.yml` 与 `pyproject.toml`。按 T10 完成块第八节留下的先例（**记下路由、不擅自扩别人的 `Files`**）先只记了路由，用户随即裁为并进 T17，于是两处同行改写：`:1527` 补 `Makefile`、`:1537` 补 netns 半边的范围。**`make smoke-table` 今天大声拒绝，不返回一张看起来完整的表** —— 它缺的三样见第六节第 1、4、5 条。
 * 条件 11 要真靶场的实测挂钟 —— **差条件 1 先通**。

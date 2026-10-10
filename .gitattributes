@@ -7,3 +7,8 @@
 Dockerfile* text eol=lf
 *.Dockerfile text eol=lf
 *.yml text eol=lf
+
+# Makefile 同一条理由，而且更隐蔽：配方行以 TAB 开头，行尾多出来的那个 \r 会被
+# 当成命令的一部分，症状是 `make: *** [target] Error 127`——看起来像「命令不存在」。
+# 本文件是门 1 条件 2 的 netns 半边，消费方是 Linux。
+Makefile text eol=lf

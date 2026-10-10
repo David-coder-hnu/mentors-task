@@ -66,6 +66,8 @@ TODOS.md                        推迟项清单
 README.md                       本文件
 CLAUDE.md                       给 AI 助手的协作约定
 
+Makefile                        本地入口（门 1 条件 2 的 netns 半边；`make help`）
+
 config/stage1_config.json       Stage 1 的配置规格 —— 同时就是 Stage 1 的真值
 src/
   adapter/                      靶场适配层：ProbeSurface / Oracle 分离，进程边界，执行沙箱
@@ -106,6 +108,15 @@ python -m venv .venv
 ```
 
 `--offline` 是**排练靶场**（不出网卡、只按 `aliased` 前缀合成回包），用来验证编排链路本身；**由它得出的数不进入报告**。去掉 `--offline` 走真靶场，但需要 Linux + `CAP_NET_RAW`，且目前只有 `B0` 一行跑得起来——`B1/B4/M1/M2` 缺一条「可复现随机源进子进程」的通道，那是 `T6a` 的接口决定。
+
+本地目标（`make help` 列全部）：
+
+```bash
+make test          # 单测（hosted CI 跑的就是这一条）
+make smoke-table   # ⚠️ 冒烟表的真靶场实跑 —— 今天会拒绝并列出缺什么
+```
+
+`make smoke-table` 是门 1 条件 2 的 netns 半边。它**今天不能跑**：靶场还没按 Stage 1 的 config 起、缺一个宿主侧编排脚本、`B1/B4/M1/M2` 缺种子通道——**它宁可炸，也不返回一张看起来完整的表。**（`Makefile` 需要 Linux 上的 `make`；本仓库的开发机是 Windows 且没装 `make`，所以它尚未在开发机上执行过，详见设计文档文末 T20 完成块第八节。）
 
 集成测试需要 Linux + `CAP_NET_RAW` + 一个在跑的靶场，在宿主上直接跑会 **skip**（Windows 建不了 ICMPv6 原始套接字）——这正是设计要的语义：单测进 hosted CI，集成测试用 marker 排除。
 
