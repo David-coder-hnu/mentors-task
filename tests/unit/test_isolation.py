@@ -178,6 +178,13 @@ class TestAgentImportGraph:
     #: （`oracle` / `truth`）、**把 `config/` 变成真值的那一步**
     #: （`ground_truth`）、runner 侧的发包栈（`runner` / `probe_pool` / `iface`），
     #: 以及整个评分层（评分层的输入是真值，所以它的每一块都间接握着真值）。
+    #:
+    #: `src.experiment` 是后加的一条，理由与 T10 那次**补 `ground_truth`** 是同
+    #: 一条：名单靠「有没有一条实路」判，不靠惯例。编排层要读 config 导真值、要
+    #: 拿权威账本、要折分，所以它**整层**握着真值侧——而它顺手好用（一行就能跑
+    #: 一张表），正是「顺手 import 一下」最可能发生的地方。这条路存在与否由
+    #: `test_importing_the_experiment_layer_really_does_reach_the_truth` 钉住：
+    #: 若哪天编排层被拆成「纯装配」与「真值部分」两层，那条会红，提醒回来重看。
     FORBIDDEN = (
         "src.adapter.oracle",
         "src.adapter.truth",
@@ -185,6 +192,7 @@ class TestAgentImportGraph:
         "src.adapter.runner",
         "src.adapter.probe_pool",
         "src.adapter.iface",
+        "src.experiment",
     )
 
     def _child_import_graph(self) -> list[str]:
@@ -208,6 +216,42 @@ class TestAgentImportGraph:
         assert not leaked, (
             f"导入 `src.agent` 会连带导入 {leaked}——"
             "策略进程的命名空间里出现了真值 / runner 侧，违反 D7"
+        )
+
+    def test_importing_the_experiment_layer_really_does_reach_the_truth(self) -> None:
+        """`FORBIDDEN` 里那条 `src.experiment` **不是按惯例加的，是有一条实路**。
+
+        这条断言证明那条路存在：编排层要读 `config/` 导真值、要拿权威账本、
+        要折分，所以它（间接）握着 `ground_truth` / `runner` / `scoring`。
+
+        **为什么值得单写一条。** T10 那次撞到的是同一件事的反面：`FORBIDDEN`
+        漏了 `src.adapter.ground_truth`，而它不是「按惯例该在」，是**有一条实路**
+        ——`config/` 就是 Stage 1 的真值，而把 config 变成真值的那一步在
+        `ground_truth.py` 里。名单里每一条都该能被这样指出来路；指不出来路的
+        条目是**靠感觉加的**，它下一次也会靠感觉漏掉真正该有的那一条。
+
+        这条同时是**双向**的：若将来有人把编排层拆成「纯装配」与「真值部分」
+        两层，`src.experiment` 不再碰到禁区，这里会红——那时该回来把
+        `FORBIDDEN` 里那条摘掉，而不是留着一条已经名不副实的禁令。
+        """
+        code = (
+            "import json, sys;"
+            "import src.experiment;"
+            "print(json.dumps(sorted(m for m in sys.modules if m.startswith('src.'))))"
+        )
+        out = subprocess.run(
+            [sys.executable, "-c", code],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        modules = set(json.loads(out.stdout.strip().splitlines()[-1]))
+        reached = sorted(modules & set(self.FORBIDDEN))
+        assert reached, (
+            "导入 `src.experiment` 没有碰到任何禁区模块——"
+            "`FORBIDDEN` 里那条已经是名不副实的禁令了，该摘掉，"
+            "而不是留着让下一个人以为它挡着什么"
         )
 
     def test_agent_does_not_pull_in_the_scoring_layer(self) -> None:

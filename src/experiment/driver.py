@@ -1,0 +1,360 @@
+"""**实验编排层** —— `策略 × seed` 的矩阵，一行一行跑，一行一行折分。
+
+这一层在 T1–T19 里**没有编号**，而门 1 的通过条件（「冒烟表跑通」，
+`ceo-plan.md:236`）与门 1 条件 2（「一键复现脚本」）都要求它存在。
+它的前身是 CEO plan 的 **C6**（「一键复现脚本 + 决策缓存打包」），进了门 1
+的工时估算却没有落成任务块。
+
+## 为什么它必须单独存在
+
+`tests/unit/test_b0.py::TestB0ThroughTheRealRunner` 已经证明这条路是通的，
+但它是一**个测试**：一个策略（B0）、一个 seed、一个假 executor。冒烟表要的是
+**5 行 × 30 seeds = 150 趟**（`:699`），每趟都要一个新的账本、一个新的
+`SurfaceServer`、一个新的 executor——**共用一个就是上一趟的包落进这一趟的
+分母**。
+
+## 今天能跑什么，不能跑什么
+
+| | 状态 |
+|---|---|
+| `B0`（全探一遍） | **能跑**。它不看观测，所以不需要随机源 |
+| `B1` / `B4` / `M1` / `M2` | **跑不了**，缺一个可复现的随机源进子进程的通道 |
+
+后一栏不是本层的疏忽：`run(surface) -> None` 没有 seed 参数，`spawn_strategy`
+只有 `extra_env`，而那条通道该走**握手**还是走**环境变量**要改 `T2` 的协议面
+——那是 `T6a` 的接口决定，本层**先不私自开一条**。理由写在 `session.py`
+的模块 docstring 末尾。
+
+## 「一键」到什么程度
+
+```
+cd <repo> && .venv/Scripts/python.exe -m src.experiment --offline --seeds 0-2
+```
+
+一条命令、零参数（`--config` 默认 `config/stage1_config.json`，`--strategy`
+默认 B0）。`docs/artifacts` 里 CEO plan 的原话是「**复现脚本必须一条命令跑完**，
+否则 oracle 的价值减半」（`:788`）。
+"""
+
+from __future__ import annotations
+
+import argparse
+import dataclasses
+import json
+import sys
+import time
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+from ..adapter.truth import Stage1Truth, Stage2Truth
+from ..scoring.score import Score
+from .executors import AccumulatingExecutor, OfflineExecutor, ProbeExecutor
+from .session import Sampler, SessionResult, load_stage1, run_session, stride_sampler
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_CONFIG = REPO_ROOT / "config" / "stage1_config.json"
+
+#: 冒烟表的五行，**写死在这里**（`:628`）。`B0` 是退化警报、`B1` 是下界、
+#: `B4` 是记忆族的无记忆控制组、`M1`/`M2` 是记忆族两行。
+#: **A1/A2 不在 Stage 1 参赛**（`:628`），`B2/B3/B5` 属 Stage 2（`:633`）。
+SMOKE_TABLE_ROWS: tuple[str, ...] = (
+    "src.baselines.b0_probe_all:run",
+    "src.baselines.b1_uniform_random:run",
+    "src.baselines.b4_response_bandit:run",
+    "src.baselines.m1_memory_cold:run",
+    "src.baselines.m2_memory_warm:run",
+)
+
+#: 今天真正跑得起来的那一行。默认值取它而不是整个 `SMOKE_TABLE_ROWS`，
+#: 是因为「一条命令跑完」在缺四条策略时会红——**红是对的，但不该是默认**。
+DEFAULT_ROW = SMOKE_TABLE_ROWS[0]
+
+
+@dataclass(frozen=True, slots=True)
+class ExperimentSpec:
+    """一次实验的**全部**输入 —— 少一样都不跑。
+
+    `executor_factory` 收 seed：真靶场那一支要拿它派生 `identifier`
+    （`probe_pool.py:18`）。排练那一支忽略它，但**签名一样**——否则
+    「换 executor 就得改编排层」多出一条不该有的接缝。
+    """
+
+    config_path: Path
+    executor_factory: Callable[[int], ProbeExecutor]
+    reset_target: Callable[[int], None]
+    sampler: Sampler = stride_sampler
+    cwd: Path | None = REPO_ROOT
+    timeout_s: float = 300.0
+    #: `None` = 从 config 读。给了就是**覆盖**，给测试用。
+    budget: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class RowResult:
+    """矩阵里的一格。"""
+
+    strategy: str
+    seed: int
+    session: SessionResult
+
+    @property
+    def score(self) -> Score:
+        return self.session.score
+
+
+@dataclass(frozen=True, slots=True)
+class MatrixResult:
+    """整张表。"""
+
+    rows: tuple[RowResult, ...]
+    #: 整张表的挂钟秒数。**门 1 条件 11 要的就是这个数**：原文是「冒烟表有
+    #: 一次实测总时长，且与预算上限对得上」——所以它由编排层测，不由脚本估。
+    elapsed_s: float
+
+    def by_strategy(self) -> dict[str, tuple[RowResult, ...]]:
+        out: dict[str, list[RowResult]] = {}
+        for row in self.rows:
+            out.setdefault(row.strategy, []).append(row)
+        return {name: tuple(group) for name, group in out.items()}
+
+    def records(self) -> list[dict[str, Any]]:
+        """机器可读的逐行记录 —— `Score` 的每一个字段都带上。
+
+        **不挑字段**：挑出来的表会在端点定义改了之后**静默地少一列**，
+        而少的那一列恰恰可能是这次改动要看的那一列（T14 要动的正是端点）。
+        """
+        out: list[dict[str, Any]] = []
+        for row in self.rows:
+            record: dict[str, Any] = {"strategy": row.strategy, "seed": row.seed}
+            record.update(dataclasses.asdict(row.score))
+            record["charged"] = row.session.charged
+            record["probes_run"] = row.session.probes_run
+            record["reports"] = [list(item) for item in row.session.reports]
+            record["elapsed_s"] = row.session.elapsed_s
+            out.append(record)
+        return out
+
+
+def run_row(
+    spec: ExperimentSpec,
+    strategy: str,
+    seed: int,
+    *,
+    truth: Stage1Truth | Stage2Truth,
+    prefixes: Sequence[str],
+    budget: int,
+) -> RowResult:
+    """跑矩阵里的一格。
+
+    **真值与前缀由调用方传进来**，不在这里读 config：150 趟各读一遍
+    config 不算贵，但它会让「所有行用的是同一份真值」变成一句要读代码
+    才能确认的话。`run_matrix` 读一次、传下去。
+    """
+    executor = AccumulatingExecutor(spec.executor_factory(seed))
+    session = run_session(
+        entry=strategy,
+        seed=seed,
+        truth=truth,
+        prefixes=prefixes,
+        budget=budget,
+        sampler=spec.sampler,
+        executor=executor,
+        reset_target=spec.reset_target,
+        cwd=spec.cwd,
+        timeout_s=spec.timeout_s,
+    )
+    return RowResult(strategy=strategy, seed=seed, session=session)
+
+
+def run_matrix(
+    spec: ExperimentSpec,
+    strategies: Sequence[str],
+    seeds: Sequence[int],
+) -> MatrixResult:
+    """把 `strategies × seeds` 全跑一遍。
+
+    **外层是策略、内层是 seed**（不是反过来）：同一策略的 30 趟连在一起，
+    中途炸掉时已经跑完的那些策略是完整的——配对检验以 `(config, seed)`
+    为单位（`:559`），半个策略的行进不了任何检验。
+
+    Raises:
+        SessionFailed: 任何一趟退出码非零。**立刻炸，不跑完剩下的**——
+            「跑完再说」会让一张缺格子的表看起来像一张完整的表。
+    """
+    if not strategies:
+        raise ValueError("没有策略就没有矩阵")
+    if not seeds:
+        raise ValueError("没有 seed 就没有配对单位")
+
+    truth, prefixes, config_budget = load_stage1(spec.config_path)
+    budget = config_budget if spec.budget is None else spec.budget
+
+    started = time.perf_counter()
+    rows: list[RowResult] = []
+    for strategy in strategies:
+        for seed in seeds:
+            rows.append(
+                run_row(spec, strategy, seed, truth=truth, prefixes=prefixes, budget=budget)
+            )
+    return MatrixResult(rows=tuple(rows), elapsed_s=time.perf_counter() - started)
+
+
+# ── 命令行 ──────────────────────────────────────────────────────────────────
+
+
+def _parse_seeds(raw: str) -> tuple[int, ...]:
+    """`"0-29"` / `"0,1,2"` / `"7"` → seed 元组。**顺序保持输入顺序。**
+
+    负 seed 在这里就拒掉，不等到 `identifier_for_seed`（`real.py`）那一步：
+    `--seeds -1` 走到那儿会报一个关于 ICMPv6 identifier 的错，而真正的问题
+    是「你要了一个不存在的 seed」。**报错要指向原因，不是指向现场。**
+    """
+    seeds: list[int] = []
+    for chunk in raw.split(","):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        low_raw, sep, high_raw = chunk.partition("-")
+        if sep and low_raw.isdigit() and high_raw.isdigit():
+            low, high = int(low_raw), int(high_raw)
+            if high < low:
+                raise ValueError(f"seed 区间 {chunk!r} 是倒的")
+            seeds.extend(range(low, high + 1))
+            continue
+        try:
+            value = int(chunk)
+        except ValueError as exc:
+            raise ValueError(f"seed 不是整数也不是区间：{chunk!r}") from exc
+        if value < 0:
+            raise ValueError(f"seed 必须非负：{value}")
+        seeds.append(value)
+
+    if not seeds:
+        raise ValueError(f"没解析出任何 seed：{raw!r}")
+    if len(set(seeds)) != len(seeds):
+        raise ValueError(f"seed 有重复：{raw!r}——同一趟跑两遍会重复计进矩阵")
+    return tuple(seeds)
+
+
+def _executor_source(args: argparse.Namespace) -> tuple[Callable[[int], ProbeExecutor], str]:
+    """`(executor 工厂, 给 stderr 的一行说明)`。
+
+    真靶场那一支的 import 放在函数里（惰性）：`src.adapter.iface` 是
+    Linux-only，模块顶层导入它会让整个 `src.experiment` 在开发机上导不进来，
+    **于是单测也跑不了**——而单测是这条路上唯一的自动化验证。见 `real.py`。
+    """
+    if args.offline:
+        truth, prefixes, _ = load_stage1(args.config)
+        # 排练那一支的回包判据取自**读出来的真值**，所以它拿不到 config 就造不出来。
+        aliased = [p for p, fields in truth.prefixes.items() if fields.get("aliased")]
+
+        def factory(_seed: int) -> ProbeExecutor:
+            return OfflineExecutor(aliased, prefixes)
+
+        return factory, "offline（排练，不出网卡）"
+
+    from .real import probe_executor
+
+    def real_factory(seed: int) -> ProbeExecutor:
+        return probe_executor(seed, max_in_flight=args.max_in_flight)
+
+    return real_factory, f"真靶场（max_in_flight={args.max_in_flight}）"
+
+
+def _build_spec(args: argparse.Namespace) -> ExperimentSpec:
+    factory, source = _executor_source(args)
+    sys.stderr.write(f"[experiment] 探测出口：{source}\n")
+    return ExperimentSpec(
+        config_path=args.config,
+        executor_factory=factory,
+        # Stage 1 的靶场**没有**由 seed 决定的状态：回包判据是
+        # `hash(dst) % 1000`（`:736`），与 seed 无关。所以这里是空操作——
+        # **不是**「忘了接重置」。Stage 2 的 shim 才有 seed 相关的状态。
+        reset_target=lambda seed: None,
+        cwd=REPO_ROOT,
+        timeout_s=args.timeout,
+    )
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        prog="python -m src.experiment",
+        description="跑一张 策略 × seed 的矩阵，并把每一格折成分。",
+    )
+    parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
+    parser.add_argument(
+        "--strategy",
+        action="append",
+        default=None,
+        help=f"策略入口，可重复。默认 {DEFAULT_ROW}",
+    )
+    parser.add_argument("--seeds", default="0", help='"0-29" 或 "0,1,2"，默认 "0"')
+    parser.add_argument("--out", type=Path, default=None, help="把逐行记录写进这个 JSON")
+    parser.add_argument(
+        "--offline",
+        action="store_true",
+        help="用排练靶场（不出网卡，只判 aliased）。**由它得出的数不进入报告**",
+    )
+    parser.add_argument(
+        "--max-in-flight",
+        type=int,
+        default=256,
+        help="真靶场的在途探测数；必须 ≤ 本环境标定的无丢包上界（默认 256）",
+    )
+    parser.add_argument("--timeout", type=float, default=300.0, help="每趟的挂钟上限（秒）")
+    args = parser.parse_args(argv)
+
+    args.config = Path(args.config)
+    strategies = tuple(args.strategy) if args.strategy else (DEFAULT_ROW,)
+    seeds = _parse_seeds(args.seeds)
+    spec = _build_spec(args)
+
+    result = run_matrix(spec, strategies, seeds)
+
+    header = f"{'strategy':<38} {'seed':>4} {'waste':>8} {'caught':>7} {'charged':>8} {'probes':>7} {'sec':>7}"
+    print(header)
+    print("-" * len(header))
+    for row in result.rows:
+        score_ = row.score
+        print(
+            f"{row.strategy:<38} {row.seed:>4} "
+            f"{score_.aliased_waste_ratio:>8.4f} {score_.aliased_caught:>7} "
+            f"{row.session.charged:>8} {row.session.probes_run:>7} "
+            f"{row.session.elapsed_s:>7.2f}"
+        )
+    print("-" * len(header))
+    print(f"rows={len(result.rows)} wall_clock_s={result.elapsed_s:.2f}")
+
+    if args.out is not None:
+        args.out.parent.mkdir(parents=True, exist_ok=True)
+        with Path(args.out).open("w", encoding="utf-8") as handle:
+            json.dump(
+                {
+                    "config": str(args.config),
+                    "strategies": list(strategies),
+                    "seeds": list(seeds),
+                    "wall_clock_s": result.elapsed_s,
+                    "rows": result.records(),
+                },
+                handle,
+                ensure_ascii=False,
+                indent=2,
+            )
+        sys.stderr.write(f"[experiment] 逐行记录写到 {args.out}\n")
+
+    return 0
+
+
+__all__ = [
+    "DEFAULT_CONFIG",
+    "DEFAULT_ROW",
+    "SMOKE_TABLE_ROWS",
+    "ExperimentSpec",
+    "MatrixResult",
+    "RowResult",
+    "main",
+    "run_matrix",
+    "run_row",
+]
