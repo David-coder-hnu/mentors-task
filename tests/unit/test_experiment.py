@@ -514,14 +514,14 @@ class TestTheMatrix:
         import src.experiment.driver as driver
 
         calls = 0
-        real = driver.load_stage1
+        real = driver.load_stage1_context
 
         def counting(path: Path):
             nonlocal calls
             calls += 1
             return real(path)
 
-        monkeypatch.setattr(driver, "load_stage1", counting)
+        monkeypatch.setattr(driver, "load_stage1_context", counting)
         run_matrix(_spec(), [B0], [0, 1, 2])
         assert calls == 1, f"config 被读了 {calls} 遍——每一行都可能读到不同的真值"
 

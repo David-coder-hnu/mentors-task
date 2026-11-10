@@ -37,7 +37,7 @@ B4 不是 LLM，所以它不存在「一次 API 调用多少钱」的问题—�
 M1/M2 每 epoch 决策一次（15 次），而一个逐包更新的 B4 会决策 300 次。那个差
 不是「记忆有无」，是「反应快慢」。
 
-所以：**轮数 `rounds = budget // EPOCH_SIZE`，每轮的大小由累进除法摊平。**
+所以：**轮数 `rounds = budget // surface.epoch_size`，每轮的大小由累进除法摊平。**
 
 ```python
 size_t = (budget * (t + 1)) // rounds - (budget * t) // rounds
@@ -49,12 +49,7 @@ size_t = (budget * (t + 1)) // rounds - (budget * t) // rounds
 「每个前缀各多少」，这里分配的是「每一轮各多少」，两者的定义域不同，而
 `b0_probe_all` 的归属是 T13 不是 T6a——一条 import 会把两个任务的交付期绑在一起。
 
-`EPOCH_SIZE = 20` 是**从 config 抄来的第二个副本**（`config/stage1_config.json`
-的 `epoch_size`）。这不是疏忽：`epoch_size` **今天没有任何通道进策略进程**
-（握手只带 `prefixes` / `seed` / 预算视图；`test_stage1_config.py` 是唯一读它的
-地方）。所以只能抄一份，并用一条测试把两份钉在一起——
-`tests/unit/test_b4.py::test_the_epoch_size_matches_the_config` 直接读 config 比对，
-改 config 不改这里就变红。
+`epoch_size` 从协议 v3 的握手进入策略，B4 不再保存第二份常量。
 
 ---
 
@@ -137,8 +132,9 @@ import random
 from collections.abc import Sequence
 from typing import Protocol
 
+from ..agent.reporting import REPEAT_FLOOR, declarations
+
 __all__ = [
-    "EPOCH_SIZE",
     "REPEAT_FLOOR",
     "UCB1_C",
     "Answered",
@@ -148,18 +144,8 @@ __all__ = [
     "run",
 ]
 
-#: 一个 epoch 的探测数。**这是 `config/stage1_config.json` 里 `epoch_size` 的
-#: 第二个副本**——`epoch_size` 今天没有任何通道进策略进程（第二节）。
-#: `tests/unit/test_b4.py::test_the_epoch_size_matches_the_config` 把两份钉在一起。
-EPOCH_SIZE = 20
-
 #: UCB1 的探索常数，教科书值 `sqrt(2)`（第一节）。
 UCB1_C = math.sqrt(2.0)
-
-#: 下判定所需的最少探测数（第五节）。**不是调出来的阈值**，是这条规则非平凡的
-#: 最小取值：1 次就下结论等于把「这一次恰好回了」当签名。
-REPEAT_FLOOR = 2
-
 
 class Answered(Protocol):
     """`sample()` 返回值里 `run()` 用到的那一个字段。
@@ -176,6 +162,7 @@ class _Surface(Protocol):
     """`run()` 需要的那一小片 `ProbeSurface`。接口是**结构性**的（同 B0/B1）。"""
 
     prefixes: tuple[str, ...]
+    epoch_size: int
 
     @property
     def budget_left(self) -> int | None: ...
@@ -280,46 +267,6 @@ def round_sizes(budget: int, rounds: int) -> tuple[int, ...]:
     )
 
 
-def declarations(
-    prefixes: Sequence[str],
-    pulls: Sequence[int],
-    rewards: Sequence[float],
-) -> list[tuple[str, bool]]:
-    """按第五节那条规则给出**最终**声明，按 `prefixes` 的顺序。
-
-    **抽出来单独一个函数是为了让它可测。** 规则只有一行，但它是 `aliased_caught`
-    的**唯一**来源（`:488`），而把它内联在 `run()` 末尾意味着唯一能测它的办法是
-    跑一趟 300 探的会话——那时测的是 UCB1 的规划，不是这条规则，于是
-    「一次不漏地回了很多次」与「只探一次恰好回了」这两条分支里，
-    **后者根本走不到**。它是本模块唯一一处「阈值」，看不见就没法质疑。
-
-    Args:
-        prefixes: 全部臂，顺序与 `pulls` / `rewards` 对齐。
-        pulls: 每个前缀**真实**探过的次数（不是规划侧的虚拟拉杆）。
-        rewards: 每个前缀**真实**回过包的次数。
-
-    Returns:
-        `(前缀, 是否 aliased)` 的列表。`pulls == 0` 的前缀**不出现**——
-        没有证据就没有判断（第五节）。
-
-    Raises:
-        ValueError: 三个序列长度不一致。静默按短的截断会让某个前缀的统计
-            用了另一个前缀的计数，而那表现为一条**错的**声明，不是报错。
-    """
-    if len(prefixes) != len(pulls) or len(prefixes) != len(rewards):
-        raise ValueError(
-            f"prefixes({len(prefixes)}) / pulls({len(pulls)}) / rewards({len(rewards)}) "
-            "长度不一致——统计错位会静默产出一条错的声明"
-        )
-
-    out: list[tuple[str, bool]] = []
-    for index, prefix in enumerate(prefixes):
-        if pulls[index] == 0:
-            continue
-        out.append((prefix, pulls[index] >= REPEAT_FLOOR and rewards[index] == pulls[index]))
-    return out
-
-
 def run(surface: _Surface) -> None:
     """B4 的入口（`strategy_child` 按 `src.baselines.b4_response_bandit:run` 加载）。
 
@@ -343,15 +290,21 @@ def run(surface: _Surface) -> None:
     prefixes = surface.prefixes
     if not prefixes:
         raise ValueError("没有前缀就没有臂")
-    if budget < EPOCH_SIZE:
+    epoch_size = surface.epoch_size
+    if not isinstance(epoch_size, int) or isinstance(epoch_size, bool) or epoch_size < 1:
+        raise ValueError(
+            f"surface.epoch_size 必须是正整数，得到 {epoch_size!r}——"
+            "协议 v3 已把决策节奏放进握手，不接受策略侧另猜一个默认值"
+        )
+    if budget < epoch_size:
         # 静默跑 0 轮会得到一次「0 次探测」的运行，而 `score()` 对它是**拒答**
         # （`score.py` 末段）——那个失败会报在评分器里，离真正的原因隔着一层。
         raise ValueError(
-            f"预算 {budget} 小于一个 epoch（{EPOCH_SIZE}）——这一趟连一次决策都"
+            f"预算 {budget} 小于一个 epoch（{epoch_size}）——这一趟连一次决策都"
             "做不了。这是 config/预算的错，不是策略的错。"
         )
 
-    rounds = budget // EPOCH_SIZE
+    rounds = budget // epoch_size
     sizes = round_sizes(budget, rounds)
     # **接住一次**（第四节）：`surface.rng()` 每次返回一个新的 `Random`，
     # 在循环里反复调它等于每次都从序列头开始。

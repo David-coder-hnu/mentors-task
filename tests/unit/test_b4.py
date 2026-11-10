@@ -35,7 +35,6 @@ from src.adapter.probe_pool import ProbeRun
 from src.adapter.runner import BudgetLedger, SurfaceServer, spawn_strategy
 from src.adapter.types import Response
 from src.baselines.b4_response_bandit import (
-    EPOCH_SIZE,
     REPEAT_FLOOR,
     UCB1_C,
     declarations,
@@ -94,6 +93,7 @@ class FakeSurface:
         self._responses: random.Random | None = None
         self.calls: list[tuple[str, int]] = []
         self.reports: list[tuple[str, bool]] = []
+        self.epoch_size = 20
 
     @property
     def budget_left(self) -> int | None:
@@ -113,6 +113,9 @@ class FakeSurface:
     def rng(self) -> random.Random:
         """与 `ProbeSurface.rng()` 同形：**每次返回一个新的 `Random`**（种子决定一切）。"""
         return random.Random(self._seed)
+
+    def remember(self, memory) -> None:  # pragma: no cover - B4 never calls it
+        raise AssertionError("B4 不应读写记忆")
 
     def _response_rng(self) -> random.Random:
         if self._responses is None:
@@ -146,28 +149,26 @@ def _rates(prefixes: list[str], aliased: int, background: float) -> dict[str, fl
 
 
 class TestEpochSize:
-    """`EPOCH_SIZE` 是 config 里 `epoch_size` 的**第二个副本**——这里把两份钉住。"""
+    """决策节奏必须从握手进入策略，不能在策略侧再抄一份常量。"""
 
-    def test_the_epoch_size_matches_the_config(self) -> None:
-        """`epoch_size` 今天**没有任何通道进策略进程**：握手只带 `prefixes` /
-        `seed` / 预算视图（`runner.py:164`）。所以 B4 只能抄一份常量，而抄来的
-        常量必须有一条测试盯着——否则改 config 而不改这里，B4 会静默地换一套
-        节奏，而「主比较里混进了再决策频率」这件事**不会以任何形式报错**。
-        """
+    def test_b4_uses_the_handshake_value(self) -> None:
         with CONFIG_PATH.open("r", encoding="utf-8") as handle:
             document = json.load(handle)
-        assert EPOCH_SIZE == document["epoch_size"], (
-            f"B4 的 EPOCH_SIZE={EPOCH_SIZE} 与 config 的 "
-            f"epoch_size={document['epoch_size']} 不一致——B4 的节奏会静默地与 "
-            "M1/M2 错开，而 M2 vs B4 是冒烟表的主比较"
+        surface = FakeSurface(
+            _prefixes(8),
+            40,
+            _rates(_prefixes(8), 1, 0.0),
         )
+        surface.epoch_size = document["epoch_size"]
+        run(surface)  # type: ignore[arg-type]
+        assert surface.spent() == 40
 
     def test_the_smoke_budget_yields_fifteen_rounds(self) -> None:
         """300 / 20 = 15 轮，与 `test_stage1_config.py` 断言的 epoch 数一致。"""
         with CONFIG_PATH.open("r", encoding="utf-8") as handle:
             document = json.load(handle)
         budget = document["budget"]
-        assert budget // EPOCH_SIZE == budget // document["epoch_size"] == 15
+        assert budget // document["epoch_size"] == 15
 
     def test_the_exploration_constant_is_the_textbook_one(self) -> None:
         """`sqrt(2)` 是 UCB1 的定义（Auer et al. 2002 的 α=2），**不是调出来的**。
@@ -403,7 +404,7 @@ class TestTheTrapIsReal:
 
         **第一版这条测试是没有牙的，值得写下来**：它从模块常量算出「每轮 20」，
         再用这个期望去切 `surface.calls`，于是 `rounds` 那个计数器**完全由期望
-        驱动**——把 `rounds = budget // EPOCH_SIZE` 改成 `len(prefixes)` 之后，
+        驱动**——把 `rounds = budget // surface.epoch_size` 改成 `len(prefixes)` 之后，
         它照样数出 15。变异检验抓到的就是这个。
 
         现在改成**观测调用本身**：`run()` 是按模块全局名调 `plan_round` 的，
@@ -421,7 +422,7 @@ class TestTheTrapIsReal:
         monkeypatch.setattr(b4, "plan_round", spy)
 
         surface = self._run(aliased=self.ALIASED, background=0.0)
-        assert sizes == list(round_sizes(self.BUDGET, self.BUDGET // EPOCH_SIZE)), (
+        assert sizes == list(round_sizes(self.BUDGET, self.BUDGET // surface.epoch_size)), (
             f"实际决策了 {len(sizes)} 轮（每轮 {sorted(set(sizes))}），期望 15 轮 × 20"
         )
         assert sum(sizes) == self.BUDGET == surface.spent()
@@ -585,6 +586,7 @@ class TestB4ThroughTheRealRunner:
             ],
             prefixes=prefixes,
             seed=seed,
+            epoch_size=20,
         )
         process = spawn_strategy(ENTRY, server=server, cwd=str(REPO_ROOT))
         return server, executor, truth, prefixes, process

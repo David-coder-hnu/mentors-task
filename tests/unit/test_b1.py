@@ -351,6 +351,7 @@ class TestB1ThroughTheRealRunner:
             ],
             prefixes=prefixes,
             seed=seed,
+            epoch_size=20,
         )
         process = spawn_strategy(ENTRY, server=server, cwd=str(REPO_ROOT))
         return server, executor, truth, prefixes, process

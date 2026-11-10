@@ -63,6 +63,11 @@ def probe_executor(
     """
     if max_in_flight < 1:
         raise ValueError(f"max_in_flight 至少为 1，得到 {max_in_flight}")
+    if max_in_flight > CALIBRATED_POOL_CEILING:
+        raise ValueError(
+            f"max_in_flight={max_in_flight} 超过本环境标定的无丢包上界 "
+            f"{CALIBRATED_POOL_CEILING}；超过后丢包会伪装成“地址不存在”"
+        )
     try:
         from ..adapter.iface import RawIcmp6Iface
     except Exception as exc:  # noqa: BLE001 - 非 Linux 上的失败形态不止一种

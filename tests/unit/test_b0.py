@@ -266,6 +266,7 @@ class TestB0ThroughTheRealRunner:
             sampler=_sampler,
             prefixes=prefixes,
             seed=self.SEED,
+            epoch_size=20,
         )
         process = spawn_strategy(
             "src.baselines.b0_probe_all:run", server=server, cwd=str(REPO_ROOT)

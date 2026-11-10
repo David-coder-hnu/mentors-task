@@ -100,6 +100,60 @@ services:
         fi
         echo "OK: 负对照无回包，符合预期"
 
+  # ── Stage 1 真靶场：32 个 /64，和调参 config 使用同一份真值 ────────────────
+  stage1-target:
+    profiles: ["stage1"]
+    image: punchingbag:smoke
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    volumes:
+      - ../config/stage1_config.json:/config/stage1.json:ro
+      - ./run/stage1-target-logs:/logs
+    working_dir: /logs
+    networks:
+      pbnet:
+        ipv6_address: 2001:db8:1::2
+    command:
+      - --interface=eth0
+      - --json-config=/config/stage1.json
+      - --thread-count=4
+
+  stage1-harness:
+    profiles: ["stage1"]
+    image: mentors-task-harness:dev
+    cap_add:
+      - NET_RAW
+      - NET_ADMIN
+    networks:
+      pbnet:
+        ipv6_address: 2001:db8:1::4
+    depends_on:
+      - stage1-target
+    volumes:
+      - ..:/w:ro
+      - ./run:/out:rw
+    working_dir: /w
+    environment:
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUNBUFFERED: "1"
+      SEEDS: "${SEEDS:-0-2}"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        ip -6 route replace 2001:db8:5::/48 via 2001:db8:1::2
+        exec python -m src.experiment \
+          --config /w/config/stage1_config.json \
+          --seeds "$$SEEDS" \
+          --max-in-flight 256 \
+          --out /out/stage1-smoke-table.rows.json \
+          --strategy src.baselines.b0_probe_all:run \
+          --strategy src.baselines.b1_uniform_random:run \
+          --strategy src.baselines.b4_response_bandit:run \
+          --strategy src.baselines.m1_memory_cold:run \
+          --strategy src.baselines.m2_memory_warm:run
+
   # ── T2：`src/` 的集成测试跑在这里 ──────────────────────────────────────────
   #
   #   cd docker

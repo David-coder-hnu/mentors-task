@@ -26,6 +26,27 @@
 
 ## 实验
 
+### 完成 A1/A2/A3 的 Stage 2 正式表
+
+**What:** 跑完 A1/A2 × 1,000 探 × 30 seeds，产出可回放决策缓存，再做 A1/A2/A3
+同 seed 配对；在此之前不得把 T16 标为完成。
+
+**Why:** 协议 v4 已把模型调用与缓存移到 runner 侧；A3 轨道、三行共用确定性报告、
+30-seed fixture 配对矩阵和 900/900 缓存回放都已通过，原先 A2 最终声明的 provider
+超时已从设计上消除。剩余问题不是代码：旧 provider 凭据应轮换，且正式矩阵需要
+900 次模型调用，而当前 `api_cost_cap=0`。当前 `construct` 也只有一个
+`balanced_probe` 白名单 blueprint，尚不等于“构造任意新原语”。
+
+**Context:** 证据见 `docs/results/t16-engineering-2026-11-10.md`。模型调用入口是
+`scripts/responses_completion.py`；缓存与 agent 结果都在 `docker/run/`，不进
+版本库。正式开跑需要新凭据、明确成本上限和冻结模型身份。
+
+**Effort:** M
+**Priority:** P1
+**Depends on:** 可用的 Stage 2 completion provider
+
+---
+
 ### 复现其余 5 个 TGA 基线（6Hit / 6Scan / 6Tree / AddrMiner-S / DET）
 
 **What:** 把 Punching Bag 论文表 3 评测过的六个 TGA 中剩下的五个也接进八行表，而不只是引用它们的已发表数字。
@@ -40,7 +61,7 @@
 
 ---
 
-### 把标定出的池大小上界变成一条会红的检查，而不是文档里的一个数
+### ~~把标定出的池大小上界变成一条会红的检查，而不是文档里的一个数~~（已完成）
 
 **What:** 让「池大小 ≤ 无丢包上界」由一个**可执行的断言**保证，而不是靠人记得别把 `max_in_flight` 设太大。
 
@@ -55,6 +76,10 @@
 **Effort:** S
 **Priority:** P2
 **Depends on:** T13（config 里定下池大小的地方）
+
+**Completed:** 2026-11-09。`probe_executor()` 在创建原始套接字之前拒绝
+`max_in_flight > CALIBRATED_POOL_CEILING`，由 `tests/unit/test_real_executor.py`
+钉住。
 
 ---
 
@@ -100,7 +125,7 @@
 
 来源：`/plan-ceo-review`（2026-10-03）的 Outside Voice 与 JSONL 产物两步。
 
-### 安装 `jq`
+### ~~安装 `jq`~~（已完成）
 
 **What:** 在开发机装上 `jq`（Windows：`winget install jqlang.jq` 或 `scoop install jq`）。
 
@@ -112,9 +137,11 @@
 **Priority:** P3
 **Depends on:** None
 
+**Completed:** 2026-11-09，系统已有 `/usr/bin/jq`。
+
 ---
 
-### 安装 Codex CLI，让评审有跨模型覆盖
+### ~~安装 Codex CLI，让评审有跨模型覆盖~~（已完成）
 
 **What:** `npm install -g @openai/codex`，使 `/plan-ceo-review` 与 `/plan-eng-review` 的 Outside Voice 步骤走真正的跨模型评审，而不是回退到 Claude 子代理。
 
@@ -125,6 +152,8 @@
 **Effort:** S
 **Priority:** P3
 **Depends on:** None
+
+**Completed:** 2026-11-09，Codex CLI 已在当前 Codex 桌面环境提供。
 
 ---
 

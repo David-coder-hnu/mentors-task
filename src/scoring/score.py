@@ -41,17 +41,17 @@
    而是被归并到某个 truth 前缀上」。**这个数留在这里是为了让口径可见**——
    若它很大，说明策略的粒度与 config 的粒度系统性错位，那本身是该知道的事。
 
-## `aliased_caught` 单独用是可以被博弈的——所以这里多算了两列
+## `aliased_caught` 的防刷分规则（T14）
 
-按定义，`aliased_caught` 在「把每个前缀都声明成 aliased」这个平凡策略上取到
-**最大值**，而两个共主端点里**另一个也不惩罚声明**（`aliased_waste_ratio` 只管
-探测花在哪，不管你怎么报）。于是存在一条退化路径：不改进任何探测行为，只把
-`report(p, True)` 打满，就在 co-primary 的一列上拿到满分。当前冒烟表里的五行
-没有一条会走这条路（B0/B1 不声明，B4/M1/M2 与 B5 都按实际判定声明），所以它
-**不是今天的数据缺陷，是端点定义的缺口**——而 A2 是会被交到 `report` 工具手里的
-LLM。修它属于 T14（端点定义的归属地）；本模块先把 `aliased_false_positives` 与
-`aliased_misses` 算出来，让这个缺口**有数可看**，而不是等它在表里以一个漂亮的
-`aliased_caught` 出现。
+一个 true 声明只有同时具备以下证据才计入 `aliased_caught`：
+
+1. 该 truth 前缀至少被探测 `MIN_ALIAS_PULLS` 次；
+2. 至少收到 `MIN_ALIAS_RESPONSES` 次回包。
+
+不满足的声明记入 `aliased_unsubstantiated_claims`。声明精度
+`caught / (caught + false_positives)` 还必须达到
+`MIN_ALIAS_CLAIM_PRECISION = 0.5`，否则该 run 的 aliased 端点不可进入胜负判据。
+这是预注册的防刷门槛，不是统计显著性；配对检验仍负责主比较。
 
 ## 重复声明的语义：**后者胜**，并且把翻供数出来
 
@@ -92,9 +92,8 @@ LLM。修它属于 T14（端点定义的归属地）；本模块先把 `aliased_
 
 **代价要说清**：`aliased_caught` 在零探测的运行上是**良定义**的（它只读声明），
 所以这条规则顺手也把它一起拒了。这不是疏忽，是取舍——但它意味着**「把每个前缀
-都声明一遍、一次不探」这个策略连分都拿不到**。见下面那条缺口的说明：真正会打满
-`aliased_caught` 的退化策略是有理由探测的（`aliased_waste_ratio` 是个**比率**，
-少探非 aliased 的前缀只会让它变差），所以这个取舍不掩护那条路径。
+都声明一遍、一次不探」这个策略连分都拿不到**。有探测但无证据的声明由 T14 的
+证据门槛单独拦住。
 
 > **「这一轮有效吗」不归本模块判。** 那是 `RangeLedger.reconcile()` 的事
 > （T2）：它管丢包与对账，`score()` 只管把**已经收到的**东西折成数。这里拒答
@@ -109,11 +108,16 @@ from dataclasses import dataclass
 
 from ..adapter.truth import Stage1Truth, Stage2Truth
 from ..adapter.types import Response
+from .endpoints import (
+    MIN_ALIAS_CLAIM_PRECISION,
+    MIN_ALIAS_PULLS,
+    MIN_ALIAS_RESPONSES,
+    qualify_aliased,
+)
 
 #: truth 里承载判定的那个键。T3 的 `stage1_truth_from_config()` 写的就是它
 #: （`ground_truth.py`），这里读同一个名字。
 _ALIASED_KEY = "aliased"
-
 
 class ScoringError(ValueError):
     """**输入**不合规，算出来的数会是错的——所以在这里炸，不往下传。
@@ -185,6 +189,10 @@ class Score:
         aliased_false_positives: 诊断。声明为 `True` 但 truth 说不是 aliased 的前缀数。
             **与 `aliased_misses` 一起，是 `aliased_caught` 那个缺口的可见化**（见模块 docstring）。
         aliased_misses: 诊断。truth 说 aliased、而最终声明不是 `True` 的前缀数。
+        aliased_unsubstantiated_claims: 声明为 aliased、但探测或回包证据不足的前缀数。
+        aliased_claim_precision: 有证据的正确声明数 / 全部 true 声明数；无声明时
+            为 `None`。
+        aliased_endpoint_admissible: 该 run 的 aliased 端点能否进入胜负判据。
         probes_charged: 分母。已计费的探测数 = `len(RunRecord.probes)`。
         probes_unattributed: 诊断。落不进**任何** truth 前缀的探测数。它们花掉了预算
             但没花在 aliased 上，所以进分母、不进分子。
@@ -203,6 +211,9 @@ class Score:
     discovered_real_prefixes: int
     aliased_false_positives: int
     aliased_misses: int
+    aliased_unsubstantiated_claims: int
+    aliased_claim_precision: float | None
+    aliased_endpoint_admissible: bool
     probes_charged: int
     probes_unattributed: int
     send_failed: int
@@ -228,6 +239,14 @@ class Score:
             )
         if not 0 <= self.aliased_false_positives:
             raise ScoringError("aliased_false_positives 不能为负")
+        if self.aliased_unsubstantiated_claims < 0:
+            raise ScoringError("aliased_unsubstantiated_claims 不能为负")
+        if self.aliased_claim_precision is not None and not (
+            0.0 <= self.aliased_claim_precision <= 1.0
+        ):
+            raise ScoringError(
+                f"aliased_claim_precision={self.aliased_claim_precision} 不在 [0, 1]"
+            )
         if not 0 <= self.probes_unattributed <= self.probes_charged:
             raise ScoringError(
                 f"probes_unattributed={self.probes_unattributed} 不在 [0, {self.probes_charged}]"
@@ -353,6 +372,8 @@ def score(run: RunRecord, truth: Stage1Truth | Stage2Truth) -> Score:
     #: 收到过回包、且 truth 说非 aliased 的前缀 —— `discovered_real_prefixes`。
     #: 用集合而不是计数，是因为端点定义是「前缀数（去重）」（`:482`）。
     responded: set[str] = set()
+    attributed_pulls: dict[str, int] = {}
+    attributed_responses: dict[str, int] = {}
 
     for probe in run.probes:
         if probe.status == "send_failed":
@@ -361,6 +382,9 @@ def score(run: RunRecord, truth: Stage1Truth | Stage2Truth) -> Score:
         if key is None:
             unattributed += 1
             continue
+        attributed_pulls[key] = attributed_pulls.get(key, 0) + 1
+        if probe.status == "received":
+            attributed_responses[key] = attributed_responses.get(key, 0) + 1
         if aliased:
             # **`send_failed` 也计进来**：预算在发包之前就扣了（`runner.py:79`），
             # 钱确实花在这个 aliased 前缀上。
@@ -385,23 +409,23 @@ def score(run: RunRecord, truth: Stage1Truth | Stage2Truth) -> Score:
             flips += 1  # 前后矛盾：留痕，不抛异常（见模块 docstring）
         final[key] = aliased  # 后者胜
 
-    caught = 0
-    false_positives = 0
-    for key, claimed in final.items():
-        if not claimed:
-            continue
-        if index.by_key[key]:
-            caught += 1
-        else:
-            false_positives += 1
-    misses = aliased_total - caught
+    qualified = qualify_aliased(
+        truth_aliased=index.by_key,
+        final_claims=final,
+        pulls=attributed_pulls,
+        responses=attributed_responses,
+    )
+    misses = aliased_total - qualified.caught
 
     return Score(
         aliased_waste_ratio=wasted / charged,
-        aliased_caught=caught,
+        aliased_caught=qualified.caught,
         discovered_real_prefixes=len(responded),
-        aliased_false_positives=false_positives,
+        aliased_false_positives=qualified.false_positives,
         aliased_misses=misses,
+        aliased_unsubstantiated_claims=qualified.unsubstantiated,
+        aliased_claim_precision=qualified.precision,
+        aliased_endpoint_admissible=qualified.admissible,
         probes_charged=charged,
         probes_unattributed=unattributed,
         send_failed=send_failed,
@@ -413,4 +437,12 @@ def score(run: RunRecord, truth: Stage1Truth | Stage2Truth) -> Score:
     )
 
 
-__all__ = ["RunRecord", "Score", "ScoringError", "score"]
+__all__ = [
+    "MIN_ALIAS_CLAIM_PRECISION",
+    "MIN_ALIAS_PULLS",
+    "MIN_ALIAS_RESPONSES",
+    "RunRecord",
+    "Score",
+    "ScoringError",
+    "score",
+]

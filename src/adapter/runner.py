@@ -33,14 +33,18 @@
 from __future__ import annotations
 
 import ipaddress
+import json
 import os
+import signal
 import subprocess
 import sys
 import threading
+import time
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import Any, Protocol
 
 from . import protocol
+from .memory import MemorySnapshot, memory_to_wire, normalize_memory
 from .oracle import Oracle
 from .probe_pool import ProbeRun, ProbeTarget
 from .protocol import PROTOCOL_VERSION, Request, UnknownVerb
@@ -55,6 +59,18 @@ class ProbeExecutor(Protocol):
     """真正发包的东西。`ProbePool` 满足它；测试注入假实现。"""
 
     def run(self, targets: Iterable[ProbeTarget | str]) -> ProbeRun: ...
+
+
+class DecisionProvider(Protocol):
+    """runner 侧决策代理的最小接口。"""
+
+    def decide(
+        self,
+        *,
+        prompt: str,
+        state: Mapping[str, Any],
+        tool_pool: Mapping[str, str],
+    ) -> Any: ...
 
 
 class BudgetLedger:
@@ -94,7 +110,10 @@ class SurfaceServer:
         sampler: Callable[[str, int], Sequence[str]],
         prefixes: Sequence[str],
         seed: int,
+        epoch_size: int,
+        memory: Mapping[str, object] | None = None,
         timeout_s: float | None = None,
+        decision_provider: DecisionProvider | None = None,
     ) -> None:
         """
         Args:
@@ -113,6 +132,8 @@ class SurfaceServer:
             raise TypeError("sampler 必须是可调用对象")
         if not isinstance(seed, int) or isinstance(seed, bool):
             raise TypeError(f"seed 必须是整数，得到 {seed!r}")
+        if not isinstance(epoch_size, int) or isinstance(epoch_size, bool) or epoch_size < 1:
+            raise TypeError(f"epoch_size 必须是正整数，得到 {epoch_size!r}")
         self.executor = executor
         self.oracle = oracle
         self.ledger = ledger
@@ -121,12 +142,19 @@ class SurfaceServer:
         if not self.prefixes:
             raise ValueError("prefixes 不能为空")
         self.seed = seed
+        self.epoch_size = epoch_size
+        self.memory: MemorySnapshot = normalize_memory(memory, self.prefixes)
         self.timeout_s = timeout_s
+        self.decision_provider = decision_provider
         #: `report()` 收到过的全部判定，按序。`aliased_caught` 的**唯一**来源
         #: （设计方案 `:488`）：评分器不得从行为里推断它。
         self.reports: list[tuple[str, bool]] = []
         #: 跑过的目标地址总数 —— 标定与对账读它。
         self.probes_run = 0
+        self.decision_calls = 0
+        self.decision_cache_hits = 0
+        self.decision_elapsed_s: list[float] = []
+        self.decision_records: list[dict[str, Any]] = []
 
     # ── 请求分发 ────────────────────────────────────────────────────────
 
@@ -161,7 +189,13 @@ class SurfaceServer:
         if request.verb == "hello":
             # `seed` 与 `prefixes` 同属**任务陈述**那一类，不是真值——理由写在
             # `protocol.TRUTH_KEYS` 上方那段，本函数是它唯一的发出点。
-            return {"protocol": PROTOCOL_VERSION, "prefixes": list(self.prefixes), "seed": self.seed}
+            return {
+                "protocol": PROTOCOL_VERSION,
+                "prefixes": list(self.prefixes),
+                "seed": self.seed,
+                "epoch_size": self.epoch_size,
+                "memory": memory_to_wire(self.memory, self.prefixes),
+            }
 
         if request.verb == "probe":
             dst = str(args["dst"])
@@ -191,6 +225,58 @@ class SurfaceServer:
                 raise TypeError(f"aliased 必须是布尔，得到 {type(aliased).__name__}")
             self.reports.append((prefix, aliased))
             return None
+
+        if request.verb == "remember":
+            self.memory = normalize_memory(args["memory"], self.prefixes)
+            return None
+
+        if request.verb == "decide":
+            if self.decision_provider is None:
+                raise ValueError(
+                    "这次会话没有配置 runner 侧决策代理；A1/A2 不能直接访问缓存或网络"
+                )
+            prompt = args["prompt"]
+            state = args["state"]
+            tool_pool = args["tool_pool"]
+            if not isinstance(prompt, str) or not prompt:
+                raise TypeError("prompt 必须是非空字符串")
+            if not isinstance(state, dict):
+                raise TypeError("state 必须是对象")
+            if not isinstance(tool_pool, dict):
+                raise TypeError("tool_pool 必须是对象")
+            if not all(
+                isinstance(name, str) and isinstance(description, str)
+                for name, description in tool_pool.items()
+            ):
+                raise TypeError("tool_pool 必须是 name -> description")
+            started = time.perf_counter()
+            decision = self.decision_provider.decide(
+                prompt=prompt,
+                state=state,
+                tool_pool=tool_pool,
+            )
+            elapsed = time.perf_counter() - started
+            self.decision_elapsed_s.append(elapsed)
+            self.decision_calls += 1
+            self.decision_cache_hits += int(decision.cache_hit)
+            try:
+                payload = json.loads(decision.raw)
+                action_kind = payload.get("action") if isinstance(payload, dict) else None
+            except json.JSONDecodeError:
+                action_kind = None
+            self.decision_records.append(
+                {
+                    "index": self.decision_calls - 1,
+                    "action": action_kind,
+                    "cache_hit": bool(decision.cache_hit),
+                    "elapsed_s": elapsed,
+                    "raw": decision.raw,
+                }
+            )
+            return {
+                "raw": decision.raw,
+                "cache_hit": decision.cache_hit,
+            }
 
         raise UnknownVerb(request.verb)  # pragma: no cover - 已被 request_from_wire 挡掉
 
@@ -266,7 +352,30 @@ class StrategyProcess:
             self._stderr_chunks.append(line)
 
     def wait(self, timeout: float | None = None) -> int:
-        code = self._popen.wait(timeout=timeout)
+        try:
+            code = self._popen.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            # 策略超时必须连同它启动的 completion 子进程一起收掉；只杀直接子进程
+            # 会留下一个仍握着网络连接的孙进程，而下一次运行可能把它当成幽灵。
+            if hasattr(os, "killpg"):
+                try:
+                    os.killpg(self._popen.pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
+            else:  # pragma: no cover - POSIX CI 走 killpg
+                self._popen.terminate()
+            try:
+                self._popen.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                if hasattr(os, "killpg"):
+                    try:
+                        os.killpg(self._popen.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                else:  # pragma: no cover
+                    self._popen.kill()
+                self._popen.wait()
+            raise
         if self._server_thread is not None:
             self._server_thread.join(timeout=timeout)
         if self._stderr_thread is not None:
@@ -319,6 +428,7 @@ def spawn_strategy(
         text=True,
         encoding="utf-8",
         bufsize=1,
+        start_new_session=True,
     )
     process = StrategyProcess(popen)
 
@@ -340,6 +450,7 @@ def spawn_strategy(
 __all__ = [
     "BudgetExhausted",
     "BudgetLedger",
+    "DecisionProvider",
     "ProbeExecutor",
     "StrategyProcess",
     "SurfaceServer",

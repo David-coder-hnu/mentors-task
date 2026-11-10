@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "IPv6 probing primitive",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "name",
+    "description",
+    "implementation_ref",
+    "inputs",
+    "outputs",
+    "safety",
+    "expected_observable"
+  ],
+  "properties": {
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{2,63}$"
+    },
+    "description": {
+      "type": "string",
+      "minLength": 20
+    },
+    "implementation_ref": {
+      "type": "string",
+      "minLength": 1
+    },
+    "inputs": {
+      "type": "object"
+    },
+    "outputs": {
+      "type": "object"
+    },
+    "safety": {
+      "type": "object",
+      "required": [
+        "uses_probe_surface_only",
+        "may_read_ground_truth",
+        "may_open_network",
+        "may_start_process"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "uses_probe_surface_only": {
+          "const": true
+        },
+        "may_read_ground_truth": {
+          "const": false
+        },
+        "may_open_network": {
+          "const": false
+        },
+        "may_start_process": {
+          "const": false
+        }
+      }
+    },
+    "expected_observable": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

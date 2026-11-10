@@ -20,7 +20,7 @@
 | `B0`（全探一遍） | **能跑**。它不看观测，所以不需要随机源 |
 | `B1`（均匀随机） | **能跑**（T6a） |
 | `B4`（响应率自适应 bandit） | **能跑**（T6a） |
-| `M1` / `M2`（记忆族） | **跑不了**，行为定义还没写进设计文档（T6c 的第一件事） |
+| `M1` / `M2`（记忆族） | **能跑**。M1 每趟冷启动；M2 读取并回写自己的 `pulls/rewards` 历史 |
 
 最后一栏此前是「B1 / B4 / M1 / M2 跑不了，缺一个可复现的随机源进子进程的通道」
 ——那个缺口由 **T6a 定夺并落地**：种子走**握手**（`SurfaceServer(seed=…)` →
@@ -29,9 +29,8 @@
 `strategy_child._hello` 当场拒绝——那种运行**没有机会产生数字**，这正是版本号
 存在的意义。三条理由写在 `surface.py` 模块 docstring 的「种子从哪来」一节。
 
-`M1`/`M2` 剩下的不是通道问题：**它们的定义在设计文档里只有半句标注**
-（`:567`），而 Stage 1 冒烟表的**主比较正是 `M2 vs B4`**（`:638`）。
-定义没写死之前那两行不能写代码，否则跑出来的是两行自己编的策略。
+`M1`/`M2` 由协议 v3 的 `epoch_size` 与 `memory` 驱动：两行共享同一 UCB1
+底座，M1 忽略历史，M2 只读取本策略自己的 `pulls/rewards` 快照并在收尾回写。
 
 ## 「一键」到什么程度
 
@@ -49,17 +48,30 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import json
+import shlex
 import sys
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from ..adapter.truth import Stage1Truth, Stage2Truth
+from ..adapter.runner import DecisionProvider
+from ..agent.cache import DecisionCache
+from ..adapter.memory import MemorySnapshot
 from ..scoring.score import Score
 from .executors import AccumulatingExecutor, OfflineExecutor, ProbeExecutor
-from .session import Sampler, SessionResult, load_stage1, run_session, stride_sampler
+from .session import (
+    Sampler,
+    SessionResult,
+    load_stage1,
+    load_stage1_context,
+    run_session,
+    stride_sampler,
+)
+from .stage2 import Stage2Context, load_stage2_context
+from .decision_broker import DecisionBroker, command_completion
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CONFIG = REPO_ROOT / "config" / "stage1_config.json"
@@ -73,6 +85,21 @@ SMOKE_TABLE_ROWS: tuple[str, ...] = (
     "src.baselines.b4_response_bandit:run",
     "src.baselines.m1_memory_cold:run",
     "src.baselines.m2_memory_warm:run",
+)
+
+#: Stage 2 的静态基线；A1/A2 另列，因为它们需要 runner 侧决策代理。
+STAGE2_BASELINE_ROWS: tuple[str, ...] = (
+    "src.baselines.b0_probe_all:run",
+    "src.baselines.b1_uniform_random:run",
+    "src.baselines.b2_response_density:run",
+    "src.baselines.b3_bit_reversal:run",
+    "src.baselines.b4_response_bandit:run",
+    "src.baselines.b5_frp_aware:run",
+)
+STAGE2_AGENT_ROWS: tuple[str, ...] = (
+    "src.agent.strategies:run_a1",
+    "src.agent.strategies:run_a2",
+    "src.agent.strategies:run_a3",
 )
 
 #: 今天真正跑得起来的那一行。默认值取它而不是整个 `SMOKE_TABLE_ROWS`，
@@ -97,6 +124,8 @@ class ExperimentSpec:
     timeout_s: float = 300.0
     #: `None` = 从 config 读。给了就是**覆盖**，给测试用。
     budget: int | None = None
+    stage: int = 1
+    decision_provider_factory: Callable[[int], DecisionProvider] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -141,6 +170,16 @@ class MatrixResult:
             record["probes_run"] = row.session.probes_run
             record["reports"] = [list(item) for item in row.session.reports]
             record["elapsed_s"] = row.session.elapsed_s
+            record["memory_prefixes"] = sum(
+                1 for entry in row.session.memory.values() if entry["pulls"] > 0
+            )
+            record["memory_pulls"] = sum(entry["pulls"] for entry in row.session.memory.values())
+            if row.session.stage2 is not None:
+                record["stage2"] = dataclasses.asdict(row.session.stage2)
+            record["decision_calls"] = row.session.decision_calls
+            record["decision_cache_hits"] = row.session.decision_cache_hits
+            record["decision_elapsed_s"] = list(row.session.decision_elapsed_s)
+            record["decision_records"] = list(row.session.decision_records)
             out.append(record)
         return out
 
@@ -153,6 +192,8 @@ def run_row(
     truth: Stage1Truth | Stage2Truth,
     prefixes: Sequence[str],
     budget: int,
+    epoch_size: int,
+    memory: Mapping[str, object] | None = None,
 ) -> RowResult:
     """跑矩阵里的一格。
 
@@ -167,6 +208,13 @@ def run_row(
         truth=truth,
         prefixes=prefixes,
         budget=budget,
+        epoch_size=epoch_size,
+        memory=memory,
+        decision_provider=(
+            spec.decision_provider_factory(seed)
+            if spec.decision_provider_factory is not None
+            else None
+        ),
         sampler=spec.sampler,
         executor=executor,
         reset_target=spec.reset_target,
@@ -196,16 +244,47 @@ def run_matrix(
     if not seeds:
         raise ValueError("没有 seed 就没有配对单位")
 
-    truth, prefixes, config_budget = load_stage1(spec.config_path)
-    budget = config_budget if spec.budget is None else spec.budget
+    if spec.stage == 2:
+        context2 = load_stage2_context(spec.config_path)
+        budget = context2.budget if spec.budget is None else spec.budget
+        truth = context2.truth
+        prefixes = context2.prefixes
+        epoch_size = context2.epoch_size
+        executor_factory = lambda seed: context2.executor(seed)
+        reset_target = lambda seed: None
+    elif spec.stage == 1:
+        context = load_stage1_context(spec.config_path)
+        budget = context.budget if spec.budget is None else spec.budget
+        truth = context.truth
+        prefixes = context.prefixes
+        epoch_size = context.epoch_size
+        executor_factory = spec.executor_factory
+        reset_target = spec.reset_target
+    else:
+        raise ValueError(f"stage 只能是 1 或 2，得到 {spec.stage}")
+    memory_by_strategy: dict[str, MemorySnapshot] = {}
 
     started = time.perf_counter()
     rows: list[RowResult] = []
     for strategy in strategies:
         for seed in seeds:
-            rows.append(
-                run_row(spec, strategy, seed, truth=truth, prefixes=prefixes, budget=budget)
+            row_spec = dataclasses.replace(
+                spec,
+                executor_factory=executor_factory,
+                reset_target=reset_target,
             )
+            row = run_row(
+                row_spec,
+                strategy,
+                seed,
+                truth=truth,
+                prefixes=prefixes,
+                budget=budget,
+                epoch_size=epoch_size,
+                memory=memory_by_strategy.get(strategy),
+            )
+            rows.append(row)
+            memory_by_strategy[strategy] = row.session.memory
     return MatrixResult(rows=tuple(rows), elapsed_s=time.perf_counter() - started)
 
 
@@ -253,6 +332,10 @@ def _executor_source(args: argparse.Namespace) -> tuple[Callable[[int], ProbeExe
     Linux-only，模块顶层导入它会让整个 `src.experiment` 在开发机上导不进来，
     **于是单测也跑不了**——而单测是这条路上唯一的自动化验证。见 `real.py`。
     """
+    if args.stage == 2:
+        context = load_stage2_context(args.config)
+        return context.executor, "RouterShim（Response 层合成间接响应）"
+
     if args.offline:
         truth, prefixes, _ = load_stage1(args.config)
         # 排练那一支的回包判据取自**读出来的真值**，所以它拿不到 config 就造不出来。
@@ -265,10 +348,23 @@ def _executor_source(args: argparse.Namespace) -> tuple[Callable[[int], ProbeExe
 
     from .real import probe_executor
 
-    def real_factory(seed: int) -> ProbeExecutor:
-        return probe_executor(seed, max_in_flight=args.max_in_flight)
+    probe_timeout = args.probe_timeout
+    if probe_timeout is None:
+        with Path(args.config).open("r", encoding="utf-8") as handle:
+            probe_timeout = float(json.load(handle)["W_s"])
+    if probe_timeout <= 0:
+        raise ValueError(f"--probe-timeout 必须为正数，得到 {probe_timeout}")
 
-    return real_factory, f"真靶场（max_in_flight={args.max_in_flight}）"
+    def real_factory(seed: int) -> ProbeExecutor:
+        return probe_executor(
+            seed,
+            max_in_flight=args.max_in_flight,
+            timeout_s=probe_timeout,
+        )
+
+    return real_factory, (
+        f"真靶场（max_in_flight={args.max_in_flight}, probe_timeout={probe_timeout:g}s）"
+    )
 
 
 def _build_spec(args: argparse.Namespace) -> ExperimentSpec:
@@ -283,6 +379,7 @@ def _build_spec(args: argparse.Namespace) -> ExperimentSpec:
         reset_target=lambda seed: None,
         cwd=REPO_ROOT,
         timeout_s=args.timeout,
+        stage=args.stage,
     )
 
 
@@ -311,31 +408,126 @@ def main(argv: Sequence[str] | None = None) -> int:
         default=256,
         help="真靶场的在途探测数；必须 ≤ 本环境标定的无丢包上界（默认 256）",
     )
+    parser.add_argument(
+        "--probe-timeout",
+        type=float,
+        default=None,
+        help="单批 sample 的排空上限；默认读 config 的 W_s",
+    )
     parser.add_argument("--timeout", type=float, default=300.0, help="每趟的挂钟上限（秒）")
+    parser.add_argument(
+        "--stage",
+        type=int,
+        choices=(1, 2),
+        default=1,
+        help="1=Stage 1 Punching Bag；2=RouterShim 合成间接响应",
+    )
+    parser.add_argument(
+        "--decision-cache",
+        type=Path,
+        default=None,
+        help="A1/A2 决策缓存 JSONL；未命中时按 completion 配置决定是否联网",
+    )
+    parser.add_argument(
+        "--completion-command",
+        default=None,
+        help="A1/A2 的本地 completion 命令；prompt 走 stdin，原始动作走 stdout",
+    )
+    parser.add_argument(
+        "--completion-timeout",
+        type=float,
+        default=120.0,
+        help="单次 completion 命令的挂钟上限（秒）",
+    )
+    parser.add_argument(
+        "--budget",
+        type=int,
+        default=None,
+        help="覆盖 config 每趟探测预算（Agent 冒烟可先设小，不用于主表）",
+    )
     args = parser.parse_args(argv)
 
     args.config = Path(args.config)
+    if args.stage == 2 and args.config == DEFAULT_CONFIG:
+        args.config = REPO_ROOT / "config" / "stage2_config.json"
     strategies = tuple(args.strategy) if args.strategy else (DEFAULT_ROW,)
     seeds = _parse_seeds(args.seeds)
     spec = _build_spec(args)
+    if args.budget is not None:
+        spec = dataclasses.replace(spec, budget=args.budget)
+    agent_rows = any("src.agent.strategies:" in strategy for strategy in strategies)
+    cache: DecisionCache | None = None
+    if agent_rows:
+        if args.stage != 2:
+            raise ValueError("A1/A2 只在 Stage 2 参赛；加 --stage 2")
+        context = load_stage2_context(args.config)
+        cache = (
+            DecisionCache.load(args.decision_cache)
+            if args.decision_cache is not None
+            else DecisionCache()
+        )
+        completion = (
+            command_completion(
+                shlex.split(args.completion_command),
+                timeout_s=args.completion_timeout,
+            )
+            if args.completion_command
+            else None
+        )
+        spec = dataclasses.replace(
+            spec,
+            decision_provider_factory=lambda seed: DecisionBroker(
+                config=context.config,
+                seed=seed,
+                cache=cache,
+                completion=completion,
+                protected_paths=(args.decision_cache,) if args.decision_cache else (),
+            ),
+        )
 
-    result = run_matrix(spec, strategies, seeds)
+    try:
+        result = run_matrix(spec, strategies, seeds)
+    except BaseException:
+        if cache is not None and args.decision_cache is not None:
+            cache.save(args.decision_cache)
+        raise
 
-    header = f"{'strategy':<38} {'seed':>4} {'waste':>8} {'caught':>7} {'charged':>8} {'probes':>7} {'sec':>7}"
+    stage2_rows = any(row.session.stage2 is not None for row in result.rows)
+    header = (
+        f"{'strategy':<38} {'seed':>4} {'waste':>8} {'caught':>7} "
+        f"{'routers':>7} {'H(router)':>9} {'charged':>8} {'probes':>7} {'sec':>7}"
+        if stage2_rows
+        else f"{'strategy':<38} {'seed':>4} {'waste':>8} {'caught':>7} {'charged':>8} {'probes':>7} {'sec':>7}"
+    )
     print(header)
     print("-" * len(header))
     for row in result.rows:
         score_ = row.score
-        print(
+        prefix = (
             f"{row.strategy:<38} {row.seed:>4} "
             f"{score_.aliased_waste_ratio:>8.4f} {score_.aliased_caught:>7} "
-            f"{row.session.charged:>8} {row.session.probes_run:>7} "
-            f"{row.session.elapsed_s:>7.2f}"
+        )
+        if stage2_rows:
+            stage2 = row.session.stage2
+            assert stage2 is not None
+            prefix += f"{stage2.true_routers:>7} {stage2.router_entropy_bits:>9.3f} "
+        print(
+            prefix
+            + f"{row.session.charged:>8} {row.session.probes_run:>7} "
+            + f"{row.session.elapsed_s:>7.2f}"
         )
     print("-" * len(header))
     print(f"rows={len(result.rows)} wall_clock_s={result.elapsed_s:.2f}")
 
     if args.out is not None:
+        if not agent_rows:
+            agent_provenance = "not-applicable"
+        elif args.completion_command is None:
+            agent_provenance = "cache-replay"
+        elif "deterministic_agent_completion" in args.completion_command:
+            agent_provenance = "fixture"
+        else:
+            agent_provenance = "completion-command"
         args.out.parent.mkdir(parents=True, exist_ok=True)
         with Path(args.out).open("w", encoding="utf-8") as handle:
             json.dump(
@@ -343,6 +535,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "config": str(args.config),
                     "strategies": list(strategies),
                     "seeds": list(seeds),
+                    "budget_override": args.budget,
+                    "completion_command": args.completion_command,
+                    "decision_cache": (
+                        str(args.decision_cache) if args.decision_cache is not None else None
+                    ),
+                    "agent_provenance": agent_provenance,
                     "wall_clock_s": result.elapsed_s,
                     "rows": result.records(),
                 },
@@ -351,6 +549,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                 indent=2,
             )
         sys.stderr.write(f"[experiment] 逐行记录写到 {args.out}\n")
+    if cache is not None and args.decision_cache is not None:
+        cache.save(args.decision_cache)
+        stats = cache.stats
+        sys.stderr.write(
+            f"[experiment] 决策缓存写到 {args.decision_cache}"
+            f"（累计命中 {stats.hits}，未命中 {stats.misses}）\n"
+        )
 
     return 0
 
@@ -359,6 +564,8 @@ __all__ = [
     "DEFAULT_CONFIG",
     "DEFAULT_ROW",
     "SMOKE_TABLE_ROWS",
+    "STAGE2_AGENT_ROWS",
+    "STAGE2_BASELINE_ROWS",
     "ExperimentSpec",
     "MatrixResult",
     "RowResult",

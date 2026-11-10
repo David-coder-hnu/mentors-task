@@ -4,10 +4,13 @@
 
 导师课题的研究仓库。仓库里同时放着**调研/设计文档**与**在可控靶场上跑对比实验的原型代码**。
 
-> ### ⚠️ 当前状态：早期研究阶段，**没有任何实验结论**
+> ### ⚠️ 当前状态：Stage 1、Stage 2 基线与 T7 兼容轨道均有实测，但**尚未完成 Agent/P1 正式检验**
 >
-> - 20 个实现任务完成 **9** 个（T1–T5、T6a、T10、T13、T20）—— 完成的是**靶场适配层、真值层、评分器、决策缓存、执行沙箱、实验编排层与两条 Stage 1 基线**（`B1` 均匀随机、`B4` 响应率自适应 bandit），即"能跑实验的地基"。**种子通道已通**（T6a，走握手，协议 v1→v2）：今天 `B0` / `B1` / `B4` 三行都跑得起来，且同 seed 重跑逐前缀相同；`M1`/`M2` 还跑不了——卡的不是通道，是它们的**行为定义还没写进设计文档**（T6c 的第一件事）。
-> - **Agent 是否更好，是一个尚未开始检验的假说。** 本仓库目前没有任何一行数据支持或反对它。
+> - 20 个实现任务完成 **19** 个（T1–T15、T17–T20）—— 完成的是**靶场适配层、真值层、评分器、决策缓存、执行沙箱、实验编排层、留出集、RouterShim、统计层、在线目标、B0–B5 基线、测试覆盖索引、Stage 1 真靶场冒烟入口、记忆族与 T7 去别名化兼容轨道**。协议已升到 **v4**：Stage 1 五行、Stage 2 六条静态基线、A1/A2 的 runner 侧决策代理与缓存回放都已接线。
+> - **Stage 1 正式 30-seed 表已完成**：45,000 探、账本 `captured=enqueued=45,000`、零 libnet 错误。M2 相对 B4/M1 的 aliased waste 增加约 22.5 个百分点（Holm 校正后 p≈5.4e-6），caught 没有改善；当前 UCB1 跨 run 记忆设计是负面结果。完整结果见 `docs/results/stage1-2026-11-10.md`。
+> - **Stage 2 RouterShim 六行基线已完成**：180,000 探、30 seeds；B5 平均发现 56.6 个路由器，B2/B4 约 29 个。A1/A2/A3 已接通协议 v4、runner 侧决策缓存、安全复合原语与共用确定性报告；30-seed fixture 预检和 900/900 缓存回放通过。真实模型表仍需轮换凭据与明确成本上限。完整结果见 `docs/results/stage2-2026-11-10.md`。
+> - **T7 已在本机完成**：Linux/arm64 Docker 中原生编译锁定版本的 `aliasv6 + scanv6`；4/4 aliased seed 被拦截，进入 scanner 的 aliased 地址为 0。完整 LSTM 6Sense 仍不冒充已完成，范围见 `docs/results/t7-6sense-compat-2026-11-10.md`。
+> - **A1/A2 是否更好仍是尚未检验的假说。** Stage 1 数据只否定当前 M2 记忆设计，不回答开放动作空间或 LLM Agent。
 > - 所有已发表的、写进设计文档的判断，凡涉及"Agent 会赢/不会赢"，都是**设计选择**，不是测量结果。
 
 ---
@@ -69,14 +72,17 @@ CLAUDE.md                       给 AI 助手的协作约定
 Makefile                        本地入口（门 1 条件 2 的 netns 半边；`make help`）
 
 config/stage1_config.json       Stage 1 的配置规格 —— 同时就是 Stage 1 的真值
+config/stage2_config.json       Stage 2 的预算/模型身份；拓扑由 RouterShim 固定生成
+config/heldout/                 独立前缀空间与响应率分布的留出集真值（T18）
+config/protocols/               对等投入与新原语 schema
 src/
   adapter/                      靶场适配层：ProbeSurface / Oracle 分离，进程边界，执行沙箱
   baselines/                    基线策略（B0–B5；Stage 1 已交付 B0 / B1 / B4）
   agent/                        Agent 决策层：状态规范化 + 决策缓存 + LLM 决策体
   scoring/                      可回放评分器
-  experiment/                   实验编排层：策略 × seed 的矩阵 + 一键复现入口
+  experiment/                   实验编排层：Stage 1/2 矩阵、决策代理与一键入口
 docker/                         Punching Bag 靶场容器（锁定上游 commit）
-scripts/                        吞吐标定与 sweep
+scripts/                        吞吐标定、Stage 2 基线/分析、6Sense 前置检查与 completion 适配器
 tests/unit/                     单测（进 hosted CI）
 tests/integration/              需要 Docker / CAP_NET_RAW 的集成测试（marker 排除）
 docs/                           文档存档，见 docs/README.md
@@ -98,7 +104,7 @@ python -m venv .venv
 .venv/Scripts/python.exe -m pip install pytest      # Windows
 # .venv/bin/python -m pip install pytest            # Linux / macOS
 
-.venv/Scripts/python.exe -m pytest                  # 576 passed, 7 skipped（2026-10-10）
+.venv/Scripts/python.exe -m pytest                  # 683 passed, 7 skipped（2026-11-09）
 ```
 
 跑一次实验（一条命令，零参数即用 `config/stage1_config.json` 跑 B0）：
@@ -107,16 +113,32 @@ python -m venv .venv
 .venv/Scripts/python.exe -m src.experiment --offline --seeds 0-2
 ```
 
-`--offline` 是**排练靶场**（不出网卡、只按 `aliased` 前缀合成回包），用来验证编排链路本身；**由它得出的数不进入报告**。去掉 `--offline` 走真靶场，但需要 Linux + `CAP_NET_RAW`。**能跑的行**：`B0` / `B1` / `B4`（`--strategy src.baselines.b1_uniform_random:run`，同 seed 重跑逐前缀相同——种子走握手，见 `T6a` 完成块）；`M1`/`M2` 还不行，它们连**行为定义**都还没有（`T6c` 的第一件事）。
+重建留出集（固定 seed，产物可直接 diff）：
+
+```bash
+.venv/bin/python -m scripts.make_heldout
+```
+
+留出集位于 `config/heldout/stage1_heldout.json`，全部前缀落在独立的
+`2001:db8:a5::/48`，aliased 数量与响应率分档都刻意不同于调参集。它用于调参，
+不参与主表；对应断言在 `tests/test_heldout_disjoint.py`。
+
+`--offline` 是**排练靶场**（不出网卡、只按 `aliased` 前缀合成回包），用来验证编排链路本身；**由它得出的数不进入报告**。去掉 `--offline` 走真靶场，但需要 Linux + `CAP_NET_RAW`。**能跑的行**：`B0` / `B1` / `B4` / `M1` / `M2`。M1 每趟冷启动，M2 读取并回写本策略自己的记忆；两行首 epoch 相同。
 
 本地目标（`make help` 列全部）：
 
 ```bash
 make test          # 单测（hosted CI 跑的就是这一条）
-make smoke-table   # ⚠️ 冒烟表的真靶场实跑 —— 今天会拒绝并列出缺什么
+make heldout       # 重建 Stage 1 留出集（固定 seed）
+make smoke-table SEEDS=0-2   # Stage 1 五行真靶场冒烟表
+make analyze-stage1          # 对最近一次 Stage 1 表做配对检验与分布
+make stage2-baselines        # Stage 2 六行 × 30 seeds（RouterShim，非外网）
+make analyze-stage2          # Stage 2 逐 seed 分布与基线配对比较
+make ablation-fixture        # A1/A2/A3 工程预检（fixture，不是模型结果）
+make analyze-ablation        # A1/A2/A3 同 seed 配对与 provenance 标记
 ```
 
-`make smoke-table` 是门 1 条件 2 的 netns 半边。它**今天不能跑**：靶场还没按 Stage 1 的 config 起、缺一个宿主侧编排脚本、`M1/M2` 缺行为定义（**种子通道那一条已由 `T6a` 补齐**，2026-10-10）——**它宁可炸，也不返回一张看起来完整的表。**（`Makefile` 需要 Linux 上的 `make`；本仓库的开发机是 Windows 且没装 `make`，所以它尚未在开发机上执行过，详见设计文档文末 T20 完成块第八节。）
+`make smoke-table` 现在会启动 Stage 1 Punching Bag、在容器内跑五行矩阵、**先停靶场再读账本**，最后把结果与账本写进 `docker/run/stage1-smoke-table.json`。正式全表使用 `SEEDS=0-29`。
 
 集成测试需要 Linux + `CAP_NET_RAW` + 一个在跑的靶场，在宿主上直接跑会 **skip**（Windows 建不了 ICMPv6 原始套接字）——这正是设计要的语义：单测进 hosted CI，集成测试用 marker 排除。
 

@@ -185,16 +185,22 @@ class ToolPool:
 
 # ── 动作 schema ───────────────────────────────────────────────────────────
 
-ActionKind = Literal["probe", "report", "stop"]
+ActionKind = Literal["probe", "report", "final_report", "construct", "stop"]
 
 #: 每种动作**恰好**允许的键。多一个拒绝、少一个拒绝——**没有第三个选项**。
 _ACTION_FIELDS: Mapping[str, frozenset[str]] = MappingProxyType(
     {
         "probe": frozenset({"action", "prefix", "count", "reason"}),
         "report": frozenset({"action", "prefix", "aliased", "reason"}),
+        "final_report": frozenset({"action", "reports", "reason"}),
+        "construct": frozenset(
+            {"action", "name", "blueprint", "count", "reason"}
+        ),
         "stop": frozenset({"action", "reason"}),
     }
 )
+
+CONSTRUCTION_BLUEPRINTS = frozenset({"balanced_probe"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -206,6 +212,9 @@ class Action:
     prefix: str | None = None
     count: int | None = None
     aliased: bool | None = None
+    name: str | None = None
+    blueprint: str | None = None
+    reports: Mapping[str, bool] | None = None
 
 
 def parse_action(text: str, *, origin: str = "模型输出") -> Action:
@@ -257,6 +266,53 @@ def parse_action(text: str, *, origin: str = "模型输出") -> Action:
 
     if kind == "stop":
         return Action(kind="stop", reason=reason)
+
+    if kind == "construct":
+        name = payload["name"]
+        blueprint = payload["blueprint"]
+        count = payload["count"]
+        if (
+            not isinstance(name, str)
+            or not name
+            or not name.replace("_", "").isalnum()
+            or not name[0].isalpha()
+        ):
+            raise bad(f"`name` 必须是字母开头的标识符，得到 {name!r}")
+        if blueprint not in CONSTRUCTION_BLUEPRINTS:
+            raise bad(
+                f"`blueprint` 必须是 {sorted(CONSTRUCTION_BLUEPRINTS)} 之一，"
+                f"得到 {blueprint!r}"
+            )
+        if not isinstance(count, int) or isinstance(count, bool) or count <= 0:
+            raise bad(f"`count` 必须是正整数，得到 {count!r}")
+        return Action(
+            kind="construct",
+            reason=reason,
+            count=count,
+            name=name,
+            blueprint=blueprint,
+        )
+
+    if kind == "final_report":
+        raw_reports = payload["reports"]
+        if not isinstance(raw_reports, dict) or not raw_reports:
+            raise bad("`reports` 必须是非空对象")
+        reports: dict[str, bool] = {}
+        for prefix, aliased in raw_reports.items():
+            if not isinstance(prefix, str):
+                raise bad(f"`reports` 的键必须是字符串，得到 {prefix!r}")
+            try:
+                ipaddress.ip_network(prefix, strict=False)
+            except ValueError as exc:
+                raise bad(f"`reports` 的前缀不是合法网络：{prefix!r}") from exc
+            if not isinstance(aliased, bool):
+                raise bad(f"`reports[{prefix!r}]` 必须是 JSON 布尔")
+            reports[prefix] = aliased
+        return Action(
+            kind="final_report",
+            reason=reason,
+            reports=MappingProxyType(reports),
+        )
 
     prefix = payload["prefix"]
     if not isinstance(prefix, str):
@@ -573,6 +629,7 @@ def decide(
 
 __all__ = [
     "LLM_IDENTITY_KEYS",
+    "CONSTRUCTION_BLUEPRINTS",
     "Action",
     "ActionKind",
     "Completion",

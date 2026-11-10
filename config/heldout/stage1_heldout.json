@@ -1,0 +1,281 @@
+{
+  "_comment": [
+    "Stage 1 留出集（T18）。这是独立调参用途的靶场真值，不参与主表。",
+    "全部前缀位于独立 /48；aliased 数量与响应率分档均与调参集不同。",
+    "生成入口：.venv/bin/python -m scripts.make_heldout",
+    "禁止手工修改；改生成规则后重跑脚本与 tests/test_heldout_disjoint.py。"
+  ],
+  "config_role": "heldout",
+  "topology_id": "stage1-heldout-v1-seed-20261109",
+  "generator_seed": 20261109,
+  "tuning_config_sha256": "f22f74fa8ba1d290f45dc80f2ef7db50db64787b71477a5054bd7b3d6c3081f0",
+  "W_s": 0.25,
+  "epoch_size": 20,
+  "budget": 300,
+  "api_cost_cap": 0,
+  "wall_clock_cap_s": 1800,
+  "model": "claude-opus-5-5",
+  "model_version": "claude-opus-5-5",
+  "temperature": 0.0,
+  "top_p": 1.0,
+  "max_tokens": 1024,
+  "call_date": "2026-10-09",
+  "subnets": [
+    {
+      "ipv6_prefix": "2001:db8:a5:0::/64",
+      "_role": "aliased",
+      "default_response_rate": 1.0,
+      "EUI_response_rate": 1.0,
+      "lower_response_rate": 1.0,
+      "higher_response_rate": 1.0
+    },
+    {
+      "ipv6_prefix": "2001:db8:a5:1::/64",
+      "_role": "aliased",
+      "default_response_rate": 1.0,
+      "EUI_response_rate": 1.0,
+      "lower_response_rate": 1.0,
+      "higher_response_rate": 1.0
+    },
+    {
+      "ipv6_prefix": "2001:db8:a5:2::/64",
+      "_role": "aliased",
+      "default_response_rate": 1.0,
+      "EUI_response_rate": 1.0,
+      "lower_response_rate": 1.0,
+      "higher_response_rate": 1.0
+    },
+    {
+      "ipv6_prefix": "2001:db8:a5:3::/64",
+      "_role": "aliased",
+      "default_response_rate": 1.0,
+      "EUI_response_rate": 1.0,
+      "lower_response_rate": 1.0,
+      "higher_response_rate": 1.0
+    },
+    {
+      "ipv6_prefix": "2001:db8:a5:4::/64",
+      "_role": "aliased",
+      "default_response_rate": 1.0,
+      "EUI_response_rate": 1.0,
+      "lower_response_rate": 1.0,
+      "higher_response_rate": 1.0
+    },
+    {
+      "ipv6_prefix": "2001:db8:a5:5::/64",
+      "_role": "aliased",
+      "default_response_rate": 1.0,
+      "EUI_response_rate": 1.0,
+      "lower_response_rate": 1.0,
+      "higher_response_rate": 1.0
+    },
+    {
+      "ipv6_prefix": "2001:db8:a5:6::/64",
+      "_role": "tier-eui-hot",
+      "default_response_rate": 0.01,
+      "EUI_response_rate": 0.9,
+      "lower_response_rate": 0.01,
+      "higher_response_rate": 0.01
+    },
+    {
+      "ipv6_prefix": "2001:db8:a5:7::/64",
+      "_role": "tier-eui-hot",
+      "default_response_rate": 0.01,
+      "EUI_response_rate": 0.9,
+      "lower_response_rate": 0.01,
+      "higher_response_rate": 0.01
+    },
+    {
+      "ipv6_prefix": "2001:db8:a5:8::/64",
+      "_role": "tier-byte-hot",
+      "default_response_rate": 0.01,
+      "EUI_response_rate": 0.01,
+      "lower_response_rate": 0.65,
+      "higher_response_rate": 0.65
+    },
+    {
+      "ipv6_prefix": "2001:db8:a5:9::/64",
+      "_role": "tier-byte-hot",
+      "default_response_rate": 0.01,
+      "EUI_response_rate": 0.01,
+      "lower_response_rate": 0.65,
+      "higher_response_rate": 0.65
+    },
+    {
+      "ipv6_prefix": "2001:db8:a5:a::/64",
+      "_role": "silent",
+      "default_response_rate": 0.0,
+      "EUI_response_rate": 0.0,
+      "lower_response_rate": 0.0,
+      "higher_response_rate": 0.0
+    },
+    {
+      "ipv6_prefix": "2001:db8:a5:b::/64",
+      "_role": "silent",
+      "default_response_rate": 0.0,
+      "EUI_response_rate": 0.0,
+      "lower_response_rate": 0.0,
+      "higher_response_rate": 0.0
+    },
+    {
+      "ipv6_prefix": "2001:db8:a5:c::/64",
+      "_role": "silent",
+      "default_response_rate": 0.0,
+      "EUI_response_rate": 0.0,
+      "lower_response_rate": 0.0,
+      "higher_response_rate": 0.0
+    },
+    {
+      "ipv6_prefix": "2001:db8:a5:d::/64",
+      "_role": "silent",
+      "default_response_rate": 0.0,
+      "EUI_response_rate": 0.0,
+      "lower_response_rate": 0.0,
+      "higher_response_rate": 0.0
+    },
+    {
+      "ipv6_prefix": "2001:db8:a5:e::/64",
+      "_role": "content-sparse",
+      "default_response_rate": 0.01,
+      "EUI_response_rate": 0.01,
+      "lower_response_rate": 0.01,
+      "higher_response_rate": 0.01
+    },
+    {
+      "ipv6_prefix": "2001:db8:a5:f::/64",
+      "_role": "content-sparse",
+      "default_response_rate": 0.01,
+      "EUI_response_rate": 0.01,
+      "lower_response_rate": 0.01,
+      "higher_response_rate": 0.01
+    },
+    {
+      "ipv6_prefix": "2001:db8:a5:10::/64",
+      "_role": "content-sparse",
+      "default_response_rate": 0.01,
+      "EUI_response_rate": 0.01,
+      "lower_response_rate": 0.01,
+      "higher_response_rate": 0.01
+    },
+    {
+      "ipv6_prefix": "2001:db8:a5:11::/64",
+      "_role": "content-sparse",
+      "default_response_rate": 0.01,
+      "EUI_response_rate": 0.01,
+      "lower_response_rate": 0.01,
+      "higher_response_rate": 0.01
+    },
+    {
+      "ipv6_prefix": "2001:db8:a5:12::/64",
+      "_role": "content-mid",
+      "default_response_rate": 0.35,
+      "EUI_response_rate": 0.35,
+      "lower_response_rate": 0.35,
+      "higher_response_rate": 0.35
+    },
+    {
+      "ipv6_prefix": "2001:db8:a5:13::/64",
+      "_role": "content-mid",
+      "default_response_rate": 0.35,
+      "EUI_response_rate": 0.35,
+      "lower_response_rate": 0.35,
+      "higher_response_rate": 0.35
+    },
+    {
+      "ipv6_prefix": "2001:db8:a5:14::/64",
+      "_role": "content-mid",
+      "default_response_rate": 0.35,
+      "EUI_response_rate": 0.35,
+      "lower_response_rate": 0.35,
+      "higher_response_rate": 0.35
+    },
+    {
+      "ipv6_prefix": "2001:db8:a5:15::/64",
+      "_role": "content-mid",
+      "default_response_rate": 0.35,
+      "EUI_response_rate": 0.35,
+      "lower_response_rate": 0.35,
+      "higher_response_rate": 0.35
+    },
+    {
+      "ipv6_prefix": "2001:db8:a5:16::/64",
+      "_role": "content-mid",
+      "default_response_rate": 0.35,
+      "EUI_response_rate": 0.35,
+      "lower_response_rate": 0.35,
+      "higher_response_rate": 0.35
+    },
+    {
+      "ipv6_prefix": "2001:db8:a5:17::/64",
+      "_role": "content-mid",
+      "default_response_rate": 0.35,
+      "EUI_response_rate": 0.35,
+      "lower_response_rate": 0.35,
+      "higher_response_rate": 0.35
+    },
+    {
+      "ipv6_prefix": "2001:db8:a5:18::/64",
+      "_role": "content-mid",
+      "default_response_rate": 0.35,
+      "EUI_response_rate": 0.35,
+      "lower_response_rate": 0.35,
+      "higher_response_rate": 0.35
+    },
+    {
+      "ipv6_prefix": "2001:db8:a5:19::/64",
+      "_role": "content-low",
+      "default_response_rate": 0.08,
+      "EUI_response_rate": 0.08,
+      "lower_response_rate": 0.08,
+      "higher_response_rate": 0.08
+    },
+    {
+      "ipv6_prefix": "2001:db8:a5:1a::/64",
+      "_role": "content-low",
+      "default_response_rate": 0.08,
+      "EUI_response_rate": 0.08,
+      "lower_response_rate": 0.08,
+      "higher_response_rate": 0.08
+    },
+    {
+      "ipv6_prefix": "2001:db8:a5:1b::/64",
+      "_role": "content-low",
+      "default_response_rate": 0.08,
+      "EUI_response_rate": 0.08,
+      "lower_response_rate": 0.08,
+      "higher_response_rate": 0.08
+    },
+    {
+      "ipv6_prefix": "2001:db8:a5:1c::/64",
+      "_role": "content-low",
+      "default_response_rate": 0.08,
+      "EUI_response_rate": 0.08,
+      "lower_response_rate": 0.08,
+      "higher_response_rate": 0.08
+    },
+    {
+      "ipv6_prefix": "2001:db8:a5:1d::/64",
+      "_role": "content-low",
+      "default_response_rate": 0.08,
+      "EUI_response_rate": 0.08,
+      "lower_response_rate": 0.08,
+      "higher_response_rate": 0.08
+    },
+    {
+      "ipv6_prefix": "2001:db8:a5:1e::/64",
+      "_role": "content-low",
+      "default_response_rate": 0.08,
+      "EUI_response_rate": 0.08,
+      "lower_response_rate": 0.08,
+      "higher_response_rate": 0.08
+    },
+    {
+      "ipv6_prefix": "2001:db8:a5:1f::/64",
+      "_role": "content-low",
+      "default_response_rate": 0.08,
+      "EUI_response_rate": 0.08,
+      "lower_response_rate": 0.08,
+      "higher_response_rate": 0.08
+    }
+  ]
+}

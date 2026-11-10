@@ -8,6 +8,9 @@ v6(a)（设计方案 `:567`）把 A1/A2 挡在 Stage 1 门外，所以 T5 在 St
    内容摘要，跨进程稳定；
 2. **状态规范化**（`canonical.py` + `decide.Stage1State`）—— 与回包到达顺序无关。
 
+此外 T12 交付 `objective.OnlineObjective`：一个只由 `Response` 计算、供 A1/A2
+在 Stage 2 使用的在线代理量。它不读取真值，也不进入 Stage 1 冒烟表。
+
 `decide.py` 里的 LLM 调用**能跑通单测，但不产生任何进入冒烟表的数字**。
 Stage 2 原样复用的是缓存与规范化，**不是决策质量**。
 
@@ -29,15 +32,14 @@ Stage 2 原样复用的是缓存与规范化，**不是决策质量**。
 这条约束**有自动验证**：`tests/unit/test_isolation.py` 在干净子进程里导入本包，
 断言 `sys.modules` 里没有上面那张表的模块。判据 6 / T17 的四条不可失败项之一。
 
-## 决策缓存是 runner 侧的东西（⚠️ 接口约束，T10 收口）
+## 决策缓存是 runner 侧的能力（协议 v4，已接线）
 
 设计方案的数据流图把**决策缓存画在 runner 进程的方框里**，同一张图的第 ③ 条边
 写着「策略进程不得读决策缓存文件本身——缓存里存着别的策略的决策」。
 
-于是本包提供的 `DecisionCache` 是**能力**，不是**许可**：谁允许调用它、经哪条路
-调用，是 T10 的沙箱规则。当前代码里还没有把缓存查询搬上 stdio 的接线——那要动
-`protocol.CLIENT_VERBS`（允许清单，加动词必须同步 `PROTOCOL_VERSION`），属 T2 的
-协议面。**这条接口在 T5 之前没有任何一处写出来过。**
+于是本包提供的 `DecisionCache` 是**能力**，不是**许可**：A1/A2 在策略进程里
+调用 `ProbeSurface.decide()`，请求经协议 v4 到 runner 的 `DecisionBroker`；缓存
+查询与 completion 都发生在 runner 侧。策略进程只收到模型原文，不接触缓存文件。
 """
 
 from __future__ import annotations
@@ -52,6 +54,7 @@ from .cache import (
     KeyMaterialError,
     cache_fingerprint,
 )
+from .ablation import AblatedResponse, AblationError, OpaqueEncoding, same_experiment_fields
 from .canonical import KEY_SCHEME, CanonicalError, canonical, digest, digest_of
 from .decide import (
     LLM_IDENTITY_KEYS,
@@ -70,6 +73,8 @@ from .decide import (
     require_llm_identity,
 )
 from .prompts import DECIDER_TEMPLATE, render
+from .objective import ObjectiveError, ObjectiveSnapshot, OnlineObjective
+from .strategies import run_a1, run_a2, run_a3
 
 __all__ = [
     "CACHE_FORMAT",
@@ -79,6 +84,8 @@ __all__ = [
     "LLM_IDENTITY_KEYS",
     "Action",
     "ActionKind",
+    "AblatedResponse",
+    "AblationError",
     "CacheFormatError",
     "CacheKey",
     "CacheStats",
@@ -90,6 +97,10 @@ __all__ = [
     "DecisionSource",
     "KeyMaterialError",
     "MalformedDecision",
+    "ObjectiveError",
+    "ObjectiveSnapshot",
+    "OpaqueEncoding",
+    "OnlineObjective",
     "Stage1State",
     "Tool",
     "ToolPool",
@@ -101,4 +112,8 @@ __all__ = [
     "parse_action",
     "render",
     "require_llm_identity",
+    "same_experiment_fields",
+    "run_a1",
+    "run_a2",
+    "run_a3",
 ]

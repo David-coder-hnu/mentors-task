@@ -47,7 +47,14 @@ from .types import Response
 #: 这一格才是这个常量存在的意义：v1 的 runner 不会发种子，而 v1 的 B1/B4 会
 #: 因为拿不到可复现的随机源**跑出不可复现的数**——版本号不同则握手当场拒绝，
 #: 那种运行根本没有机会产生数字。
-PROTOCOL_VERSION = 2
+#:
+#: **v3（T6c，2026-11-09）**：握手多了 `epoch_size` 与策略自观测 `memory`；
+#: 客户端多一个 `remember` 动词。M1/M2 的首 epoch、记忆更新与跨 run 回写都依赖
+#: 这三项，缺任一项都不能静默降级成“无记忆”。
+#:
+#: **v4（2026-11-10）**：A1/A2 的 `decide` 动词。缓存与模型调用留在 runner，
+#: 策略进程只收到模型原文；这不改变第 ① 条边的真值白名单。
+PROTOCOL_VERSION = 4
 
 #: 跨过第 ① 条边的**全部**字段（设计方案 `:1143` 的「八个字段」）。
 WIRE_RESPONSE_FIELDS = frozenset(
@@ -85,7 +92,9 @@ TRUTH_KEY_SUFFIXES = ("_rate",)
 
 #: 客户端可以发的动词。**允许清单，不是禁止清单**：未知动词一律拒绝，
 #: 免得 runner 侧将来多加一个动词时策略进程能悄悄用上它。
-CLIENT_VERBS = frozenset({"hello", "probe", "sample", "report"})
+CLIENT_VERBS = frozenset(
+    {"hello", "probe", "sample", "report", "remember", "decide"}
+)
 
 #: `probe()` 的 `proto` 参数当前唯一支持的值（Stage 1/2 都是 ICMPv6 echo）。
 PROTO_ICMP6_ECHO = "icmp6-echo"

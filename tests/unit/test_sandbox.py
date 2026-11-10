@@ -98,6 +98,8 @@ class TestTheProtectedRootIsSealed:
 
     @pytest.mark.parametrize("written", WINDOWS_IN)
     def test_every_spelling_of_the_same_file_is_refused(self, written: str) -> None:
+        if written == "CONFIG/stage1_config.json" and not (REPO_ROOT / "CONFIG").exists():
+            pytest.skip("当前文件系统区分大小写，CONFIG/ 不是 config/ 的别名")
         with pytest.raises(SandboxViolation, match="受保护根"):
             POLICY.check_open(written)
 
@@ -517,33 +519,16 @@ class TestTheDefaultPolicyCoversTheRepoRoot:
         assert str(len(DENIED_MODULES)) in text
 
 
-# ── ⑧ 指路标：决策缓存那条仍然开着的接口约束 ──────────────────────────────
+# ── ⑧ 决策缓存的 runner 侧通道 ──────────────────────────────────────────
 
 
 class TestTheCacheIsAnOpenItem:
-    """`sandbox.py` 第九、十节那条。**这一组断言的是我们还没做的东西。**
+    """缓存查询只能经过 runner 的 `decide`，不能给策略文件能力。"""
 
-    两条当前为真的事实，各自代表那条约束的一个出口：
-
-    * `protocol.CLIENT_VERBS` 里没有缓存动词 ⇒ 缓存查询**没有** stdio 通路
-      （`:1482` 明写：要加动词必须同步 `PROTOCOL_VERSION`，那是 T2 的协议面）。
-    * `PROTECTED_SUBDIRS` 只有 `config` ⇒ 缓存**没有**规范落盘位置，所以沙箱
-      指不出该封哪个目录（`DecisionCache.load/save` 收的是调用方传的 `path`）。
-
-    两条一起说的是同一件事：**这条约束今天既没有通路也没有围栏，它是靠「还没
-    接线」而安全的。** 所以这一组是**指路标**：下面任何一条变红，都不是「测试
-    过时了」，而是**这件事现在必须做完**。
-    """
-
-    def test_there_is_no_verb_that_could_carry_a_cache_lookup(self) -> None:
-        cache_like = [verb for verb in protocol.CLIENT_VERBS if "cache" in verb or "decide" in verb]
-        assert not cache_like, (
-            f"协议里出现了缓存动词 {cache_like}——"
-            "` :1482` 要求加动词必须同步 `protocol.PROTOCOL_VERSION`，"
-            "而且这条路要由 runner 侧按**当前 seed 的键**回答，"
-            "不能让策略自己拿着文件读（`:1179`：缓存里存着别的策略的决策）"
-        )
-        assert protocol.CLIENT_VERBS == frozenset({"hello", "probe", "sample", "report"})
+    def test_decide_is_the_only_cache_adjacent_verb(self) -> None:
+        assert "decide" in protocol.CLIENT_VERBS
+        assert not [verb for verb in protocol.CLIENT_VERBS if "cache" in verb]
+        assert protocol.PROTOCOL_VERSION == 4
 
     def test_the_cache_still_has_no_canonical_location(self) -> None:
         for method in (DecisionCache.load, DecisionCache.save):

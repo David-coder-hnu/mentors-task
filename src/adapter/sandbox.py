@@ -133,7 +133,7 @@ unshare -m --map-root-user sh -c 'mount --bind /empty /path/to/repo/config; exec
 Linux + `CAP_SYS_ADMIN`，本仓库的开发环境是 Windows**，所以本任务交付的是可移植
 那一层，并把这一层记进 `TODOS`，不是假装审计钩子等于命名空间隔离。
 
-## 九、这一模块**没有**回答的那条接口约束（T5 递过来，`:1482`）
+## 九、决策缓存的接口约束（T5 递过来，`:1482`；2026-11-10 已接线）
 
 `:1482` 记了一条此前没有落点的接口约束：**决策缓存是能力，不是许可。**
 
@@ -141,26 +141,24 @@ Linux + `CAP_SYS_ADMIN`，本仓库的开发环境是 Windows**，所以本任�
   写着「策略进程不得读决策缓存文件本身——缓存里存着别的策略的决策」（`:1179`）。
 * **本模块给它的落点是：受保护根机制**（把缓存根填进 `protected_roots` 就封住），
   但它**指不出**该填哪个路径——缓存今天由调用方传显式 `path`（第四节）。
-* **正确的路由是走 stdio**：查询经一条新动词到 runner 侧，由持有缓存的进程按
-  **当前 seed 的键**回答。那要动 `protocol.CLIENT_VERBS`（一个白名单，加动词必须
-  同步 `PROTOCOL_VERSION`），那是 **T2 的协议面**，不在 T10 的 `Files` 里。
+* **当前路由是走 stdio**：协议 v4 的 `decide` 动词把 prompt / 规范化状态 / 工具池
+  交给 runner 的 `DecisionBroker`，由持有缓存的进程按当前 seed 与完整键回答。
+  策略进程只拿回模型原文，拿不到缓存文件内容。
+* 缓存路径仍由调用方显式提供；`ExperimentSpec` 会把它作为额外受保护根通过
+  `PROTECTED_ROOTS_ENV` 传给子进程，即使 A2 猜中路径，`open()` 仍会失败。
 
-> **所以 T10 关掉的是那七条 critical gap 里的最后一条（读 `config/`），而不是
-> 这一条。** 这条的处置是**具名的、开着的**：见第十节那条会红的断言。
+> T10 关掉的是读 `config/`；v4 `decide` 在此之上补了 runner 侧缓存通路。
 
-## 十、用一条断言把「开着的」变成「响的」
+## 十、让这条路线的边界继续可测
 
 一件开着的事，如果只能靠人记得，它就是下一个 critical gap。所以这里放一条
-**指路用的断言**（`tests/unit/test_sandbox.py::TestTheCacheIsAnOpenItem`）：它断言
-`protocol.CLIENT_VERBS` 里**没有**缓存动词、且 `cache.py` 没有任何默认路径——
-**两件当前为真的事**。它不是「检查我们做对了」，是「标出我们还没做的那件事」：
+相关断言（`tests/unit/test_sandbox.py::TestTheCacheIsAnOpenItem`）现在锁定：
 
-* 若有人把缓存查询接上 stdio，它**必须**加动词 → 前半条变红，提醒同步
-  `PROTOCOL_VERSION`（`:1482` 明写的要求）。
+* `decide` 是唯一的缓存相关动词，协议版本已升到 v4；
 * 若有人给 `DecisionCache` 定了一个默认落盘位置，它**必须**同时进
-  `protected_roots` → 后半条变红。
+  `protected_roots`。
 
-两条变红都不是「测试过时了」，是**这件事现在必须做完**。
+显式传入的路径也必须经环境变量加入受保护根；这条是缓存文件层的第二道锁。
 """
 
 from __future__ import annotations
@@ -200,6 +198,10 @@ class SandboxViolation(Exception):
 #: 加一个目录的门槛是「**它里面能算出真值**」：装进去容易，装错了的代价是把
 #: 策略的正常读取变成违规，而那种红是**假红**，会让这条断言的信誉贬值。
 PROTECTED_SUBDIRS: tuple[str, ...] = ("config",)
+
+#: 子进程从 runner 显式接收的额外受保护根。路径本身可以可见，读取内容不行；
+#: 这样 A2 即使猜到决策缓存位置，`open()` 仍会当场失败。
+PROTECTED_ROOTS_ENV = "MENTORS_TASK_PROTECTED_ROOTS"
 
 #: 逃逸口与网络原语。**禁的是能力不是风格**——理由见模块 docstring 第七节。
 DENIED_MODULES: frozenset[str] = frozenset(
@@ -288,6 +290,33 @@ def _resolve(path: object) -> Path | None:
         return None
 
 
+def _is_same_or_below(target: Path, root: Path) -> bool:
+    """判断 `target` 是否等于 `root` 或其子路径。
+
+    纯词法比较在大小写不敏感的文件系统上不够：macOS 默认 APFS 会让
+    `CONFIG/stage1_config.json` 真的打开 `config/stage1_config.json`，但
+    `POSIXPath` 仍按大小写区分字符串。只看 `is_relative_to()` 会把这个
+    实际存在的别名放过去。
+
+    因此先做不碰文件系统的词法判断，再用 `samefile` 比较现存祖先。后一步
+    只在需要时才调用，且不读取文件内容，所以不会在审计钩子里递归。对于
+    `CONFIG/does-not-exist.json` 这类目标，只要 `CONFIG` 目录本身与 `config/`
+    是同一 inode，仍然能判中。
+    """
+    if target == root or target.is_relative_to(root):
+        return True
+
+    for candidate in (target, *target.parents):
+        try:
+            if candidate.exists() and os.path.samefile(candidate, root):
+                return True
+        except OSError:
+            # 权限不足、路径在检查期间消失等情况下继续看更高层祖先；真正的
+            # 文件系统错误会由随后被拒绝或失败的打开操作自行暴露。
+            continue
+    return False
+
+
 @dataclass(frozen=True)
 class SandboxPolicy:
     """沙箱策略 —— **它是数据，不是行为**。
@@ -313,7 +342,8 @@ class SandboxPolicy:
             return None
         for root in self.protected_roots:
             # `is_relative_to` 比字符串前缀严：`/repo/configs` 不在 `/repo/config` 里。
-            if target == root or target.is_relative_to(root):
+            # `_is_same_or_below` 再补上 macOS 默认大小写不敏感文件系统的身份判断。
+            if _is_same_or_below(target, root):
                 return root
         return None
 
@@ -377,7 +407,11 @@ class SandboxPolicy:
         )
 
 
-def default_policy(repo_root: str | os.PathLike[str] | None = None) -> SandboxPolicy:
+def default_policy(
+    repo_root: str | os.PathLike[str] | None = None,
+    *,
+    extra_roots: tuple[str | os.PathLike[str], ...] = (),
+) -> SandboxPolicy:
     """默认策略：封 `PROTECTED_SUBDIRS`，用 `DENIED_MODULES` / `DENIED_EVENTS`。
 
     `repo_root` 默认由**本文件的所在位置**推出来（`src/adapter/sandbox.py` 往上
@@ -385,7 +419,9 @@ def default_policy(repo_root: str | os.PathLike[str] | None = None) -> SandboxPo
     ——一个 `cwd=/` 的子进程会因此失去全部保护，而那是静默的。
     """
     root = Path(repo_root).resolve() if repo_root is not None else Path(__file__).resolve().parents[2]
-    return SandboxPolicy(protected_roots=tuple((root / sub).resolve() for sub in PROTECTED_SUBDIRS))
+    roots = [(root / sub).resolve() for sub in PROTECTED_SUBDIRS]
+    roots.extend(Path(extra).resolve() for extra in extra_roots)
+    return SandboxPolicy(protected_roots=tuple(dict.fromkeys(roots)))
 
 
 # ── 装钩子 ──────────────────────────────────────────────────────────────────

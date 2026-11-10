@@ -29,8 +29,8 @@
 | | 交付物 | 状态 |
 |---|---|---|
 | **T6a** | `b1_uniform_random.py`、`b4_response_bandit.py` + 种子通道 | **已交付（2026-10-10）** |
-| T6b | `b2.py`、`b3.py`、`b5.py`（Stage 2） | 未开工。**B5 的 (i)/(ii) 归类未定前不得开工** |
-| T6c | `m1.py`、`m2.py`（记忆族） | 未开工。**先把 M1/M2 的行为定义写进设计文档**，那是本任务的第一件事 |
+| T6b | `b2_response_density.py`、`b3_bit_reversal.py`、`b5_frp_aware.py`（Stage 2） | **已交付（2026-11-09）** |
+| T6c | `m1_memory_cold.py`、`m2_memory_warm.py`（记忆族） | **已交付（2026-11-09）**；两行共用 UCB1 底座，只切换跨 run 历史 |
 
 **文件名与设计文档的简写不一致，以这里为准。** 设计文档的 T6a 段写的是
 `src/baselines/b1.py`、`b4.py`，而 `src/experiment/driver.py` 的

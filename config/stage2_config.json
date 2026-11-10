@@ -1,0 +1,21 @@
+{
+  "_comment": [
+    "Stage 2 的运行配置。前缀和四档响应率复用 Stage 1 的第三方靶场规格；",
+    "RouterShim 在这份规格之上合成间接响应与最后一跳身份。",
+    "路由器拓扑由 src/experiment/stage2.py 的固定规则生成：每个响应的非 aliased",
+    "前缀恰有三个路由器，aliased 前缀恰有一个，沉默前缀没有可达路由器。",
+    "这不是真实互联网拓扑，Stage 2 的结论只在这个 Response 层测试床内成立。"
+  ],
+  "base_config": "stage1_config.json",
+  "W_s": 0.25,
+  "epoch_size": 100,
+  "budget": 1000,
+  "api_cost_cap": 0,
+  "wall_clock_cap_s": 1800,
+  "model": "deepseek-flash",
+  "model_version": "deepseek-flash",
+  "temperature": 0.0,
+  "top_p": 1.0,
+  "max_tokens": 1024,
+  "call_date": "2026-11-10"
+}

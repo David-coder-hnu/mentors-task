@@ -1,0 +1,31 @@
+{
+  "name": "6Sense",
+  "repository": "https://github.com/IPv6-Security/6Sense",
+  "commit": "ad582e5cf9bf8ca2fd4538710bba6b24328b6fa3",
+  "license": "Apache-2.0",
+  "role": "oracle-assisted external upper bound",
+  "scanner": "https://github.com/IPv6-Security/scanv6",
+  "scanner_commit": "67f6ceca2318017d0a96361056e527020c15b1b0",
+  "offline_dealiaser": "https://github.com/IPv6-Security/offline-dealiaser",
+  "offline_dealiaser_commit": "e357120ba138798867059af992647ddddebda39e",
+  "required_runtime": {
+    "os": "Linux x86_64",
+    "python": "3.11",
+    "tensorflow": "2.12 GPU",
+    "cuda": "11.3",
+    "cudnn": "8.2"
+  },
+  "compat_runtime": {
+    "os": "Linux arm64 or amd64",
+    "runner": "Docker",
+    "python": "3.12",
+    "gpu_required": false,
+    "scope": "aliasv6 + scanv6 dealiasing gate"
+  },
+  "required_inputs": [
+    "prefix_to_as",
+    "aliased_prefixes",
+    "expanded_ipv6_seed_addresses",
+    "lstm_checkpoint"
+  ]
+}

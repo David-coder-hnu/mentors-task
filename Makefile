@@ -30,7 +30,7 @@ endif
 SEEDS ?= 0-2
 
 .DEFAULT_GOAL := help
-.PHONY: help test test-unit smoke-offline harness range-smoke range-down sweep smoke-table
+.PHONY: help test test-unit smoke-offline heldout harness range-smoke range-down sweep smoke-table analyze-stage1 stage2-baselines analyze-stage2 ablation-fixture analyze-ablation 6sense-compat
 
 # ── 帮助 ─────────────────────────────────────────────────────────────────────
 
@@ -40,14 +40,21 @@ help:
 	@echo "  make test            单测。hosted CI 跑的就是这一条"
 	@echo "  make test-unit       只跑 tests/unit"
 	@echo "  make smoke-offline   编排层排练：策略 × seed 的矩阵，不出网卡"
+	@echo "  make heldout         重建 Stage 1 留出集（固定 seed）"
 	@echo "  make harness         在 harness 容器里跑 tests/integration（需要 Docker）"
 	@echo "  make range-smoke     T1 的靶场冒烟：正例 5/5 + 负对照 0/5"
 	@echo "  make range-down      停掉靶场容器"
 	@echo "  make sweep           吞吐标定（产出 docs/perf_baseline.md 的素材）"
-	@echo "  make smoke-table     [不能跑] 冒烟表的真靶场实跑 —— 会拒绝并列出缺什么"
+	@echo "  make smoke-table     Stage 1 五行 × seeds 的真靶场冒烟表"
+	@echo "  make analyze-stage1  对最近一次 Stage 1 结果做配对检验与分布"
+	@echo "  make stage2-baselines  Stage 2 六行 × seeds（RouterShim，非外网）"
+	@echo "  make analyze-stage2   对最近一次 Stage 2 基线做分布与配对比较"
+	@echo "  make ablation-fixture A1/A2/A3 × 30 seeds 的确定性工程预检（不是模型结果）"
+	@echo "  make analyze-ablation 对最近一次 A1/A2/A3 矩阵做同 seed 配对分析"
+	@echo "  make 6sense-compat    T7：Linux/arm64 容器中的 aliasv6 + scanv6 去别名化验收"
 	@echo ""
 	@echo "  PY=$(PY)"
-	@echo "  SEEDS=$(SEEDS)   （make smoke-offline SEEDS=0-29）"
+	@echo "  SEEDS=$(SEEDS)   （smoke-offline / smoke-table 都可用 SEEDS=0-29）"
 
 # ── 宿主侧就能跑的（与 CI 同一条） ───────────────────────────────────────────
 
@@ -60,7 +67,16 @@ test-unit:
 #: 排练靶场（不出网卡）。**由它得出的数不进入报告**——回包判据是按 `aliased`
 #: 前缀合成出来的，不是真靶场给的。它的用途是验证编排链路本身。
 smoke-offline:
-	$(PY) -m src.experiment --offline --seeds $(SEEDS)
+	$(PY) -m src.experiment --offline --seeds $(SEEDS) \
+		--strategy src.baselines.b0_probe_all:run \
+		--strategy src.baselines.b1_uniform_random:run \
+		--strategy src.baselines.b4_response_bandit:run \
+		--strategy src.baselines.m1_memory_cold:run \
+		--strategy src.baselines.m2_memory_warm:run
+
+#: 重建 T18 的留出集。固定 seed，产物可直接 diff。
+heldout:
+	$(PY) -m scripts.make_heldout
 
 #: 吞吐标定。脚本自己 `cwd=docker/`，所以在仓库根调用即可。
 sweep:
@@ -82,37 +98,38 @@ range-smoke:
 range-down:
 	cd docker && docker compose down
 
-#: ⚠️ **门 1 条件 1 / 2 的那条腿，今天不能跑。** 它必须大声拒绝，不能静默。
-#:
-#: 它应该在真靶场上跑冒烟表（B0/B1/B4/M1/M2 × 30 seeds），并把逐行记录落到
-#: `--out`。缺三样东西，缺哪一样都会让结果**看起来正常**，所以列出来：
-#:
-#:   1. **靶场没有按 Stage 1 的 config 起。** `docker/compose.yml` 的 `target`
-#:      挂的是 `docker/smoke/punchingbag-smoke.json`——那是 T1 的脚手架，两个
-#:      前缀（`dead` / `0bad`），不是 Stage 1 的 32 个 `/64`。要让冒烟表量的是
-#:      Stage 1，得从 `config/stage1_config.json` 生成一份 Punching Bag 的
-#:      `--json-config`，并给 `2001:db8:5::/48` 配路由。这件事 T13 已具名记在
-#:      `:1780`（「要么改 compose.yml，要么新起一个 profile」），**当时没有归属**。
-#:   2. **缺一个宿主侧编排脚本。** 形状与 `scripts/perf_sweep.py` 完全一样：
-#:      起靶场 → 容器内跑编排层 → **停靶场** → 读账本。第 3 步不可省——靶场的
-#:      `packet_log.txt` 只在正常退出时 flush，活着读会读到被截断的文件，于是
-#:      「我们发了多少」对不上，而那个假报**指向保守结论**，不会有人质疑。
-#:   3. **冒烟表 5 行里 4 行缺一条种子通道**（B1/B4/M1/M2）。契约是
-#:      `run(surface) -> None`，没有 seed 参数；那条通道走握手还是走环境变量要动
-#:      `T2` 的协议面，**是 T6a 的接口决定**（见 T20 完成块第四、六节）。
-#:
-#: 这三样都在 T17 里（第 1、2 项是它的 netns 半边，第 3 项在 T6a）。
-#: **在它们落地之前，这条目标宁可炸，也不返回一张看起来完整的表。**
+#: Stage 1 的真靶场：五行 × seeds。宿主脚本负责起靶场、跑 harness、**先停靶场
+#: 再读账本**以及清理。默认 0-2 是排练规模；正式入口传 `SEEDS=0-29`。
 smoke-table:
-	@echo "" >&2
-	@echo "make smoke-table: 不能跑 —— 门 1 条件 2 的 netns 半边还没接线。" >&2
-	@echo "" >&2
-	@echo "  1) 靶场没按 Stage 1 的 config 起（挂的是 T1 的 smoke 脚手架，" >&2
-	@echo "     docker/smoke/punchingbag-smoke.json；见设计方案 :1780）" >&2
-	@echo "  2) 缺宿主侧编排脚本（起靶场 → 容器内跑 → 停靶场 → 读账本，" >&2
-	@echo "     与 scripts/perf_sweep.py 同一形状）" >&2
-	@echo "  3) B1/B4/M1/M2 缺种子通道（归 T6a；今天只有 B0 能真跑）" >&2
-	@echo "" >&2
-	@echo "中间形态：make smoke-offline（排练靶场，出不了网卡，数不进报告）" >&2
-	@echo "" >&2
-	@exit 1
+	$(PY) scripts/run_smoke_table.py --seeds $(SEEDS)
+
+analyze-stage1:
+	$(PY) scripts/analyze_smoke_table.py docker/run/stage1-smoke-table.json
+
+stage2-baselines:
+	$(PY) -m src.experiment --stage 2 --seeds $(SEEDS) \
+		--strategy src.baselines.b0_probe_all:run \
+		--strategy src.baselines.b1_uniform_random:run \
+		--strategy src.baselines.b2_response_density:run \
+		--strategy src.baselines.b3_bit_reversal:run \
+		--strategy src.baselines.b4_response_bandit:run \
+		--strategy src.baselines.b5_frp_aware:run \
+		--out docker/run/stage2-baselines.json
+
+analyze-stage2:
+	$(PY) scripts/analyze_stage2.py docker/run/stage2-baselines.json
+
+ablation-fixture:
+	$(PY) -m src.experiment --stage 2 --seeds $(SEEDS) \
+		--strategy src.agent.strategies:run_a1 \
+		--strategy src.agent.strategies:run_a2 \
+		--strategy src.agent.strategies:run_a3 \
+		--completion-command '$(PY) tests/fixtures/deterministic_agent_completion.py' \
+		--decision-cache docker/run/stage2-a123-fixture-cache.jsonl \
+		--out docker/run/stage2-a123-fixture.json
+
+analyze-ablation:
+	$(PY) scripts/analyze_ablation.py docker/run/stage2-a123-fixture.json
+
+6sense-compat:
+	bash scripts/run_6sense_compat.sh

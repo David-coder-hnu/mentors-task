@@ -6,6 +6,10 @@
 **本层必须有真值**，否则它算的不是分。
 
 Stage 1 的落点是两个共主端点（`aliased_waste_ratio` / `aliased_caught`），
-见 `score.py`。`stats.py`（配对检验，T11）与 `endpoints.py`（端点定义，T14）
-是同一目录下的后续步骤——**不是并行项**（`:1255`）。
+见 `score.py`。`endpoints.py`（T14）已交付证据与精度门槛，`stats.py` 与
+`report.py`（T11）已交付配对 Wilcoxon、Holm 校正和逐 seed 分布报告。
 """
+
+from .stage2 import Stage2Score, score_stage2
+
+__all__ = ["Stage2Score", "score_stage2"]

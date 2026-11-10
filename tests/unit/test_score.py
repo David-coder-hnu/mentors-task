@@ -71,6 +71,13 @@ def _declaring(*reports: tuple[str, bool], probe: str = "2001:db8:cccc::1") -> R
     return RunRecord(probes=(_quiet(probe),), reports=reports)
 
 
+def _alias_evidence(prefix: str, n: int = 2) -> tuple[Response, ...]:
+    """给一个声明补足最小证据：至少 `n` 次探测、`n` 次回包。"""
+
+    network = prefix.split("/")[0]
+    return tuple(_reply(f"{network}{i + 1:x}") for i in range(n))
+
+
 #: 四个前缀，四类各一 —— 与 T3 的 `SMALL_CONFIG` 同一形状，便于两边对照。
 #: aaaa = aliased（唯一一个）；bbbb = 有内容且**有一档是 1.0**（不是 aliased）；
 #: cccc = 沉默；dddd = 四档字段全缺（靶场缺省 0，也是沉默）。
@@ -99,7 +106,7 @@ class TestExtremes:
         )
         run = RunRecord(
             probes=tuple(_reply(f"2001:db8:1::{i:x}") for i in range(3))
-            + tuple(_quiet(f"2001:db8:2::{i:x}") for i in range(3)),
+            + tuple(_reply(f"2001:db8:2::{i:x}") for i in range(3)),
             reports=(("2001:db8:1::/64", True), ("2001:db8:2::/64", True)),
         )
         result = score(run, truth)
@@ -232,7 +239,11 @@ class TestAliasedCaught:
 
     def test_only_correct_declarations_are_caught(self) -> None:
         truth = _mixed_truth()
-        run = _declaring(("2001:db8:aaaa::/64", True), ("2001:db8:bbbb::/64", True))
+        run = RunRecord(
+            probes=_alias_evidence("2001:db8:aaaa::/64")
+            + _alias_evidence("2001:db8:bbbb::/64"),
+            reports=(("2001:db8:aaaa::/64", True), ("2001:db8:bbbb::/64", True)),
+        )
         result = score(run, truth)
 
         assert result.aliased_caught == 1  # 只有 aaaa 报对了
@@ -241,7 +252,10 @@ class TestAliasedCaught:
 
     def test_the_same_prefix_reported_twice_is_counted_once(self) -> None:
         truth = _mixed_truth()
-        run = _declaring(("2001:db8:aaaa::/64", True), ("2001:db8:aaaa::/64", True))
+        run = RunRecord(
+            probes=_alias_evidence("2001:db8:aaaa::/64"),
+            reports=(("2001:db8:aaaa::/64", True), ("2001:db8:aaaa::/64", True)),
+        )
         result = score(run, truth)
 
         assert result.aliased_caught == 1
@@ -269,7 +283,10 @@ class TestAliasedCaught:
         而那是我们自己的记账口径造成的。
         """
         truth = _mixed_truth()
-        run = _declaring(("2001:db8:aaaa::/80", True))
+        run = RunRecord(
+            probes=_alias_evidence("2001:db8:aaaa::/64"),
+            reports=(("2001:db8:aaaa::/80", True),),
+        )
         result = score(run, truth)
 
         assert result.aliased_caught == 1
@@ -284,7 +301,10 @@ class TestAliasedCaught:
         **以上**的粗粒度前缀，其网络地址落在 truth 之外——记 off-target。
         """
         truth = _mixed_truth()
-        run = _declaring(("2001:db8:aaaa::/48", True), ("2001:db8:ffff::/64", True))
+        run = RunRecord(
+            probes=_alias_evidence("2001:db8:aaaa::/64"),
+            reports=(("2001:db8:aaaa::/48", True), ("2001:db8:ffff::/64", True)),
+        )
         result = score(run, truth)
 
         # 2001:db8:aaaa::/48 的网络地址是 2001:db8:aaaa::，**在** /64 里 → 归属
@@ -301,58 +321,58 @@ class TestAliasedCaught:
         assert result.aliased_caught == 0
 
 
-# ── 那个缺口 ────────────────────────────────────────────────────────────────
+# ── 防刷分门槛 ──────────────────────────────────────────────────────────────
 
 
-class TestTheEndpointIsGameable:
-    """**这组测试是给一条设计发现用的**（见 `score.py` 的模块 docstring）。
+class TestTheEndpointResistsGaming:
+    """T14：声明必须有证据，且精度不足的 run 不能进入胜负判据。"""
 
-    `aliased_caught` 单独用可以被一个平凡策略打满：把每个前缀都声明成 aliased。
-    两个共主端点里另一个也不惩罚声明——`aliased_waste_ratio` 只管探测花在哪。
-    冒烟表里的五行没有一条会走这条路，所以它不是今天的数据缺陷，是**端点定义
-    的缺口**，而 A2 是会被交到 `report` 工具手里的 LLM。修它属于 T14；
-    本模块把它**算出来**，让它有数可看。
-    """
-
-    def test_declaring_everything_aliased_maximizes_caught(self) -> None:
+    def test_declaring_everything_aliased_no_longer_maximizes_caught(self) -> None:
         truth = _mixed_truth()
         every_prefix = tuple((p, True) for p in truth.prefixes)
-        # 诚实的退化策略**有理由探测**：`aliased_waste_ratio` 是个比率，少探
-        # 非 aliased 的前缀只会让它变差。所以这里给一次探测，而不是空跑
-        # ——空跑连分都拿不到（见 `score.py` 对零探测的说明）。
         run = RunRecord(
             probes=(_reply("2001:db8:bbbb::1"),),  # 探一个非 aliased 的，比值最优
             reports=every_prefix,
         )
         result = score(run, truth)
 
-        # 满分：没改进任何探测行为，只在声明的形状上做文章
-        assert result.aliased_caught == result.aliased_prefixes_total == 1
-        # 但缺口在这里可见——三个非 aliased 前缀全被误报
+        assert result.aliased_caught == 0
+        assert result.aliased_unsubstantiated_claims == 1
         assert result.aliased_false_positives == 3
+        assert result.aliased_claim_precision == 0.0
+        assert result.aliased_endpoint_admissible is False
 
-    def test_the_gaming_run_and_the_honest_run_are_indistinguishable_on_caught_alone(self) -> None:
-        """这一条是上面那句「缺口」的可执行形式：**只看 `aliased_caught` 分不出来**。
-
-        两个 run 的 `aliased_caught` 相同，而一个是真判定、一个是打满。
-        没有 `aliased_false_positives`，表上这两个 run 在共主端点上完全一样。
-        """
+    def test_the_gaming_run_and_the_honest_run_are_now_separable(self) -> None:
         truth = _mixed_truth()
         honest = RunRecord(
-            probes=(_reply("2001:db8:aaaa::1"),),
+            probes=_alias_evidence("2001:db8:aaaa::/64"),
             reports=(("2001:db8:aaaa::/64", True),),
         )
         spammer = RunRecord(
-            probes=(_reply("2001:db8:bbbb::1"),),
+            probes=_alias_evidence("2001:db8:bbbb::/64"),
             reports=tuple((p, True) for p in truth.prefixes),
         )
 
         honest_score = score(honest, truth)
         spammer_score = score(spammer, truth)
 
-        assert honest_score.aliased_caught == spammer_score.aliased_caught == 1
+        assert honest_score.aliased_caught == 1
+        assert spammer_score.aliased_caught == 0
         assert honest_score.aliased_false_positives == 0
         assert spammer_score.aliased_false_positives == 3
+        assert honest_score.aliased_endpoint_admissible is True
+        assert spammer_score.aliased_endpoint_admissible is False
+
+    def test_one_reply_is_not_enough_evidence(self) -> None:
+        truth = _mixed_truth()
+        run = RunRecord(
+            probes=(_reply("2001:db8:aaaa::1"),),
+            reports=(("2001:db8:aaaa::/64", True),),
+        )
+        result = score(run, truth)
+        assert result.aliased_caught == 0
+        assert result.aliased_unsubstantiated_claims == 1
+        assert result.aliased_endpoint_admissible is False
 
 
 # ── 次要诊断 ────────────────────────────────────────────────────────────────

@@ -55,7 +55,7 @@ from __future__ import annotations
 
 import ipaddress
 import random
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any, TypeVar
 
 from .protocol import (
@@ -69,6 +69,7 @@ from .protocol import (
     request_to_wire,
     response_from_wire,
 )
+from .memory import MemorySnapshot, memory_to_wire, normalize_memory
 from .types import Response
 
 _T = TypeVar("_T")
@@ -85,6 +86,18 @@ def _decode_ack(result: Any) -> None:
     if result is not None:
         raise ProtocolError(f"report 的结果应是 null，得到 {type(result).__name__}")
     return None
+
+
+def _wire_safe_state(value: object) -> object:
+    """把规范化状态变成可 JSON 的等价值；集合排序后仍是集合语义。"""
+
+    if isinstance(value, Mapping):
+        return {str(key): _wire_safe_state(item) for key, item in value.items()}
+    if isinstance(value, (frozenset, set)):
+        return sorted(value)  # type: ignore[return-value]
+    if isinstance(value, tuple):
+        return tuple(_wire_safe_state(item) for item in value)
+    return value
 
 
 class SurfaceError(RuntimeError):
@@ -134,6 +147,8 @@ class ProbeSurface:
         *,
         budget_left: int | None = None,
         seed: int,
+        epoch_size: int,
+        memory: Mapping[str, object] | None = None,
     ) -> None:
         """
         `seed` **必填、无默认值**（T6a / 协议 v2）：它由握手带回来，是这套实验里
@@ -146,6 +161,8 @@ class ProbeSurface:
             raise ValueError("prefixes 不能为空——没有任务范围就不是一次实验")
         if not isinstance(seed, int) or isinstance(seed, bool):
             raise TypeError(f"seed 必须是整数，得到 {seed!r}")
+        if not isinstance(epoch_size, int) or isinstance(epoch_size, bool) or epoch_size < 1:
+            raise TypeError(f"epoch_size 必须是正整数，得到 {epoch_size!r}")
         self._networks = tuple(ipaddress.ip_network(p, strict=False) for p in prefixes)
         #: 去重后的前缀列表，原样保留给策略读（它是任务陈述，不是真值）。
         self.prefixes: tuple[str, ...] = tuple(dict.fromkeys(prefixes))
@@ -153,6 +170,8 @@ class ProbeSurface:
         self._next_id = 0
         self._budget_left: int | None = budget_left
         self._seed = seed
+        self._epoch_size = epoch_size
+        self._memory = normalize_memory(memory, self.prefixes)
 
     # ── 探测 ────────────────────────────────────────────────────────────
 
@@ -194,6 +213,58 @@ class ProbeSurface:
         self._require_in_scope(prefix)
         self._call("report", {"prefix": prefix, "aliased": bool(aliased)}, _decode_ack)
 
+    def remember(self, memory: Mapping[str, object]) -> None:
+        """回写**自己的**观测计数，供下一次 run 的 M2 使用。
+
+        记忆只允许每个前缀的 `pulls` / `rewards`。runner 会再校验一次，
+        防止策略进程绕过本地检查塞入真值字段、越界前缀或其他策略的数据。
+        """
+        normalized = normalize_memory(memory, self.prefixes)
+        self._call("remember", {"memory": memory_to_wire(normalized, self.prefixes)}, _decode_ack)
+
+    def decide(
+        self,
+        *,
+        prompt: str,
+        state: Mapping[str, object],
+        tool_pool: Mapping[str, str],
+    ) -> tuple[str, bool]:
+        """向 runner 的决策缓存/模型代理要一条原始动作。
+
+        策略进程拿不到缓存文件，也不直接联网。返回 `(raw, cache_hit)`；
+        schema 解析仍由策略侧 `parse_action()` 在关键路径上完成。
+        """
+
+        if not isinstance(prompt, str) or not prompt:
+            raise ValueError("prompt 必须是非空字符串")
+        if not isinstance(state, Mapping):
+            raise TypeError("state 必须是映射")
+        if not isinstance(tool_pool, Mapping):
+            raise TypeError("tool_pool 必须是映射")
+
+        def decode(result: Any) -> tuple[str, bool]:
+            if not isinstance(result, dict):
+                raise ProtocolError("decide 的结果必须是对象")
+            if set(result) != {"raw", "cache_hit"}:
+                raise ProtocolError(f"decide 结果字段不匹配：{sorted(result)}")
+            raw = result["raw"]
+            hit = result["cache_hit"]
+            if not isinstance(raw, str) or not raw.strip():
+                raise ProtocolError("decide 的 raw 必须是非空字符串")
+            if not isinstance(hit, bool):
+                raise ProtocolError("decide 的 cache_hit 必须是 bool")
+            return raw, hit
+
+        return self._call(
+            "decide",
+            {
+                "prompt": prompt,
+                "state": _wire_safe_state(state),
+                "tool_pool": dict(tool_pool),
+            },
+            decode,
+        )
+
     def reset(self) -> None:
         """清空**策略侧**的记忆与预算视图。不重置靶场，不发请求。
 
@@ -230,6 +301,21 @@ class ProbeSurface:
         seed」这件事有代码路径。
         """
         return self._seed
+
+    @property
+    def epoch_size(self) -> int:
+        """本实验每次决策覆盖的探测数，由 runner 从 config 经握手送入。"""
+
+        return self._epoch_size
+
+    @property
+    def memory(self) -> MemorySnapshot:
+        """本 run 起始时的自观测记忆副本；改它不会影响任何权威状态。"""
+
+        return {
+            prefix: {"pulls": entry["pulls"], "rewards": entry["rewards"]}
+            for prefix, entry in self._memory.items()
+        }
 
     def rng(self) -> random.Random:
         """**这次会话的随机源。** 每个需要随机性的策略都从这里取，不要另起。

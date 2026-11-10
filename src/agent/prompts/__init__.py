@@ -25,11 +25,10 @@ bug 1（`:563`）是「键里没有 prompt 版本」：改一句 prompt 后重�
 签名规则写进 prompt 等于把答案发给考生，A1/A2 那一列就变成了对 B5（手写启发式）
 的抄写。B5 的公平性协议（`:1422`）要求 B5 与 A2 **同信息**——两边都不能拿到方法。
 
-## 与 A3 的关系（T16，当前 BLOCKED）
+## 与 A3 的关系（T16）
 
-知识消融对照要一份**不动其它任何字段**的变体，放在 `prompts/ablated/`。
-本包现在只提供基准模板；变体归 T16，且它的机制**已声明失效、待重设计**（`:1479`），
-在重设计落地前不得开工。
+知识消融使用 `ablated.py` 中独立的不透明模板。A1/A2 的基准模板现在支持
+`reporting=False`：模型只决定预算如何花，最终声明由三行共用的确定性规则完成。
 """
 
 from __future__ import annotations
@@ -60,17 +59,15 @@ DECIDER_TEMPLATE = """\
 
 ## 你需要输出的东西
 
-只输出一个 JSON 对象，不要别的东西。三种形状之一：
+只输出一个 JSON 对象，不要别的东西。允许的形状：
 
-  {{"action": "probe",  "prefix": "<前缀>", "count": <正整数>, "reason": "<一句话>"}}
-  {{"action": "report", "prefix": "<前缀>", "aliased": true|false, "reason": "<一句话>"}}
-  {{"action": "stop",   "reason": "<一句话>"}}
+{actions}
 
 规则：
 - 除上面列出的键之外**不得有多余的键**（多一个键这一条就会被拒收）。
 - `reason` 必填且非空：你的每一个决定都要能被读出来为什么。
-- `aliased` 必须是 JSON 的 true / false，**不是** 1 / 0。
 - `count` 是本次要探的地址数，不得超过剩余预算。
+{rules}
 """
 
 
@@ -78,6 +75,9 @@ def render(
     *,
     tools: Sequence[tuple[str, str]],
     state_text: str,
+    objective_text: str | None = None,
+    construction: bool = False,
+    reporting: bool = True,
 ) -> str:
     """把模板渲染成**模型真正看到的那串字节**。
 
@@ -91,7 +91,42 @@ def render(
         渲染后的 prompt 文本。**它的字节就是 `cache.CacheKey` 里 `prompt` 那一个分量。**
     """
     rendered_tools = "\n".join(f"- `{name}`：{description}" for name, description in tools)
-    return DECIDER_TEMPLATE.format(tools=rendered_tools or "（工具池为空）", state=state_text)
+    actions = [
+        '  {"action": "probe", "prefix": "<前缀>", "count": <正整数>, "reason": "<一句话>"}'
+    ]
+    if reporting:
+        actions.extend(
+            [
+                '  {"action": "report", "prefix": "<前缀>", "aliased": true|false, "reason": "<一句话>"}',
+                '  {"action": "final_report", "reports": {"<前缀>": true|false}, "reason": "<一句话>"}',
+                '  {"action": "stop", "reason": "<一句话>"}',
+            ]
+        )
+    if construction:
+        actions.append(
+            '  {"action": "construct", "name": "<标识符>", "blueprint": "balanced_probe", '
+            '"count": <正整数>, "reason": "<一句话>"}'
+        )
+    rules = (
+        "- `aliased` 必须是 JSON 的 true / false，**不是** 1 / 0。\n"
+        "- 剩余预算大于 0 时只做探测/构造，`count` 必须恰好等于当前 epoch 的预算。\n"
+        "- 花完预算后用一次 `final_report` 提交全部最终判断。"
+        if reporting
+        else "- 每个决策必须恰好花完当前 epoch 的预算；最终判定由固定报告规则完成。"
+    )
+    prompt = DECIDER_TEMPLATE.format(
+        tools=rendered_tools or "（工具池为空）",
+        state=state_text,
+        actions="\n".join(actions),
+        rules=rules,
+    )
+    if objective_text:
+        prompt += (
+            "\n## 在线目标\n\n"
+            "以下数值仅由你可见的 Response 推导，不是真值：\n\n"
+            f"{objective_text}\n"
+        )
+    return prompt
 
 
 __all__ = ["DECIDER_TEMPLATE", "render"]

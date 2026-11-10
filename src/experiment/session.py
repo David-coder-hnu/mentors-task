@@ -55,17 +55,26 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import subprocess
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from ..adapter.ground_truth import stage1_truth_from_config
+from ..adapter.memory import MemorySnapshot, normalize_memory
 from ..adapter.oracle import Oracle
-from ..adapter.runner import BudgetLedger, ProbeExecutor, SurfaceServer, spawn_strategy
+from ..adapter.runner import (
+    BudgetLedger,
+    DecisionProvider,
+    ProbeExecutor,
+    SurfaceServer,
+    spawn_strategy,
+)
 from ..adapter.truth import Stage1Truth, Stage2Truth
 from ..scoring.score import RunRecord, Score, score
+from ..scoring.stage2 import Stage2Score, score_stage2
 from .executors import AccumulatingExecutor
 
 #: `(prefix, n) -> 地址序列` —— 与 `SurfaceServer.sampler` 同一个签名。
@@ -110,6 +119,46 @@ class SessionResult:
     #: 这一趟的挂钟秒数。**门 1 条件 11 要的就是这个数**（「冒烟表有一次
     #: 实测总时长，且与预算上限对得上」），所以它由编排层测，不由脚本估。
     elapsed_s: float
+    #: 本趟结束时的策略自观测记忆。M1/B0/B1/B4 通常为空；M2 回写后非空。
+    memory: MemorySnapshot
+    #: Stage 2 的主端点与路由器诊断；Stage 1 为 None。
+    stage2: Stage2Score | None = None
+    decision_calls: int = 0
+    decision_cache_hits: int = 0
+    decision_elapsed_s: tuple[float, ...] = ()
+    decision_records: tuple[dict[str, object], ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class Stage1Context:
+    """Stage 1 一次矩阵共享的不可变会话参数。"""
+
+    truth: Stage1Truth
+    prefixes: tuple[str, ...]
+    budget: int
+    epoch_size: int
+
+
+def load_stage1_context(config_path: Path) -> Stage1Context:
+    """读 config 中所有**跨行共享**的会话参数。"""
+
+    truth = stage1_truth_from_config(config_path)
+    with Path(config_path).open("r", encoding="utf-8") as handle:
+        document: dict[str, Any] = json.load(handle)
+    prefixes = tuple(
+        str(ipaddress.ip_network(entry["ipv6_prefix"], strict=False))
+        for entry in document["subnets"]
+    )
+    budget = int(document["budget"])
+    epoch_size = int(document["epoch_size"])
+    if epoch_size < 1:
+        raise ValueError(f"epoch_size 必须为正整数，得到 {epoch_size}")
+    return Stage1Context(
+        truth=truth,
+        prefixes=prefixes,
+        budget=budget,
+        epoch_size=epoch_size,
+    )
 
 
 def load_stage1(config_path: Path) -> tuple[Stage1Truth, tuple[str, ...], int]:
@@ -125,15 +174,8 @@ def load_stage1(config_path: Path) -> tuple[Stage1Truth, tuple[str, ...], int]:
             花不完、要么被 runner 拒（`SurfaceError`），两种失败都表现为
             「跑完了，结果不对」。
     """
-    truth = stage1_truth_from_config(config_path)
-    with Path(config_path).open("r", encoding="utf-8") as handle:
-        document: dict[str, Any] = json.load(handle)
-    prefixes = tuple(
-        str(ipaddress.ip_network(entry["ipv6_prefix"], strict=False))
-        for entry in document["subnets"]
-    )
-    budget = int(document["budget"])
-    return truth, prefixes, budget
+    context = load_stage1_context(config_path)
+    return context.truth, context.prefixes, context.budget
 
 
 def stride_sampler(prefix: str, n: int) -> list[str]:
@@ -170,9 +212,12 @@ def run_session(
     truth: Stage1Truth | Stage2Truth,
     prefixes: Sequence[str],
     budget: int,
+    epoch_size: int,
+    memory: Mapping[str, object] | None,
     sampler: Sampler,
     executor: AccumulatingExecutor,
     reset_target: Callable[[int], None],
+    decision_provider: DecisionProvider | None = None,
     cwd: Path | None = None,
     timeout_s: float = 300.0,
 ) -> SessionResult:
@@ -210,13 +255,35 @@ def run_session(
         sampler=sampler,
         prefixes=prefixes,
         seed=seed,
+        epoch_size=epoch_size,
+        memory=memory,
         timeout_s=timeout_s,
+        decision_provider=decision_provider,
     )
 
     started = time.perf_counter()
-    process = spawn_strategy(entry, server=server, cwd=str(cwd) if cwd is not None else None)
+    protected_paths = getattr(decision_provider, "protected_paths", ())
+    extra_env = (
+        {"MENTORS_TASK_PROTECTED_ROOTS": json.dumps(list(protected_paths))}
+        if protected_paths
+        else None
+    )
+    process = spawn_strategy(
+        entry,
+        server=server,
+        cwd=str(cwd) if cwd is not None else None,
+        extra_env=extra_env,
+    )
     try:
-        exit_code = process.wait(timeout=timeout_s)
+        try:
+            exit_code = process.wait(timeout=timeout_s)
+        except subprocess.TimeoutExpired as exc:
+            raise SessionFailed(
+                entry,
+                seed,
+                124,
+                process.stderr() + f"\n[session] 超过墙钟上限 {timeout_s:g}s，已终止进程组",
+            ) from exc
     finally:
         elapsed_s = time.perf_counter() - started
 
@@ -224,6 +291,7 @@ def run_session(
         raise SessionFailed(entry, seed, exit_code, process.stderr())
 
     run = RunRecord(probes=executor.probes(), reports=tuple(server.reports))
+    stage2_score = score_stage2(run, truth) if isinstance(truth, Stage2Truth) else None
     return SessionResult(
         strategy=entry,
         seed=seed,
@@ -232,6 +300,12 @@ def run_session(
         probes_run=server.probes_run,
         reports=tuple(server.reports),
         elapsed_s=elapsed_s,
+        memory=normalize_memory(server.memory, prefixes),
+        stage2=stage2_score,
+        decision_calls=server.decision_calls,
+        decision_cache_hits=server.decision_cache_hits,
+        decision_elapsed_s=tuple(server.decision_elapsed_s),
+        decision_records=tuple(server.decision_records),
     )
 
 

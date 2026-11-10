@@ -93,6 +93,7 @@ def make_server(**kwargs) -> SurfaceServer:
         sampler=lambda prefix, n: [f"{prefix.rstrip(':')}::{i:x}" for i in range(1, n + 1)],
         prefixes=[PREFIX],
         seed=SEED,
+        epoch_size=20,
     )
     options.update(kwargs)
     return SurfaceServer(**options)  # type: ignore[arg-type]
@@ -102,7 +103,13 @@ def make_wired(server: SurfaceServer) -> tuple[ProbeSurface, MemoryChannel]:
     """接上一对 (surface, channel)；channel 里留着服务端发过的每一帧。"""
     channel = MemoryChannel(on_request=server.handle)
     return (
-        ProbeSurface([PREFIX], channel.client_side(), seed=server.seed),
+        ProbeSurface(
+            [PREFIX],
+            channel.client_side(),
+            seed=server.seed,
+            epoch_size=server.epoch_size,
+            memory=server.memory,
+        ),
         channel,
     )
 
@@ -191,7 +198,8 @@ class TestAgentImportGraph:
 
     #: 策略侧命名空间里**绝不能**出现的模块：真值本身的定义处
     #: （`oracle` / `truth`）、**把 `config/` 变成真值的那一步**
-    #: （`ground_truth`）、runner 侧的发包栈（`runner` / `probe_pool` / `iface`），
+    #: （`ground_truth`）、runner 侧的响应合成与发包栈
+    #: （`router_shim` / `runner` / `probe_pool` / `iface`），
     #: 以及整个评分层（评分层的输入是真值，所以它的每一块都间接握着真值）。
     #:
     #: `src.experiment` 是后加的一条，理由与 T10 那次**补 `ground_truth`** 是同
@@ -204,6 +212,7 @@ class TestAgentImportGraph:
         "src.adapter.oracle",
         "src.adapter.truth",
         "src.adapter.ground_truth",
+        "src.adapter.router_shim",
         "src.adapter.runner",
         "src.adapter.probe_pool",
         "src.adapter.iface",
@@ -692,13 +701,19 @@ class TestHandshakeCarriesTheBudget:
 
     def test_the_surface_knows_the_budget_before_the_first_probe(self) -> None:
         surface = ProbeSurface(
-            [PREFIX], MemoryChannel().client_side(), budget_left=7, seed=SEED
+            [PREFIX],
+            MemoryChannel().client_side(),
+            budget_left=7,
+            seed=SEED,
+            epoch_size=20,
         )
         assert surface.budget_left == 7, "构造参数没被接上"
 
     def test_the_surface_still_defaults_to_unknown(self) -> None:
         """不给就是 `None` —— **不猜一个默认值**（猜错的两种方向都是静默失败）。"""
-        surface = ProbeSurface([PREFIX], MemoryChannel().client_side(), seed=SEED)
+        surface = ProbeSurface(
+            [PREFIX], MemoryChannel().client_side(), seed=SEED, epoch_size=20
+        )
         assert surface.budget_left is None
 
     def test_hello_returns_the_whole_reply_not_just_its_result(self) -> None:
@@ -737,7 +752,9 @@ class TestTheRandomSource:
     """
 
     def _surface(self, seed: int = SEED) -> ProbeSurface:
-        return ProbeSurface([PREFIX], MemoryChannel().client_side(), seed=seed)
+        return ProbeSurface(
+            [PREFIX], MemoryChannel().client_side(), seed=seed, epoch_size=20
+        )
 
     def test_it_is_seeded_by_the_session_seed(self) -> None:
         """同一个 seed ⇒ 同一条序列，而且是 `random.Random`（不是别的什么）。"""
@@ -1043,7 +1060,7 @@ class TestSurfaceScope:
 
     def test_empty_prefix_list_is_refused(self) -> None:
         with pytest.raises(ValueError, match="prefixes 不能为空"):
-            ProbeSurface([], MemoryChannel().client_side(), seed=SEED)
+            ProbeSurface([], MemoryChannel().client_side(), seed=SEED, epoch_size=20)
 
     def test_the_seed_is_mandatory_and_must_be_an_int(self) -> None:
         """`seed` 漏传必须炸（T6a / 协议 v2），理由与 `sampler` 那条同源。
@@ -1057,11 +1074,17 @@ class TestSurfaceScope:
           退化成 `seed=1`，与某个真实配对撞车。
         """
         with pytest.raises(TypeError):
-            ProbeSurface([PREFIX], MemoryChannel().client_side())  # type: ignore[call-arg]
+            ProbeSurface(  # type: ignore[call-arg]
+                [PREFIX], MemoryChannel().client_side(), epoch_size=20
+            )
         with pytest.raises(TypeError, match="seed 必须是整数"):
-            ProbeSurface([PREFIX], MemoryChannel().client_side(), seed=None)  # type: ignore[arg-type]
+            ProbeSurface(  # type: ignore[arg-type]
+                [PREFIX], MemoryChannel().client_side(), seed=None, epoch_size=20
+            )
         with pytest.raises(TypeError, match="seed 必须是整数"):
-            ProbeSurface([PREFIX], MemoryChannel().client_side(), seed=True)
+            ProbeSurface(
+                [PREFIX], MemoryChannel().client_side(), seed=True, epoch_size=20
+            )
 
     def test_oracle_requires_both_collaborators(self) -> None:
         """漏接 T3 的导出或漏接重置回调，必须是 `TypeError` 而不是静默空真值。"""
@@ -1085,6 +1108,7 @@ class TestSurfaceScope:
                 ledger=BudgetLedger(10),
                 prefixes=[PREFIX],
                 seed=SEED,
+                epoch_size=20,
             )
 
     def test_the_server_seed_is_mandatory_and_must_be_an_int(self) -> None:
@@ -1099,6 +1123,7 @@ class TestSurfaceScope:
             ledger=BudgetLedger(10),
             sampler=lambda prefix, n: [],
             prefixes=[PREFIX],
+            epoch_size=20,
         )
         with pytest.raises(TypeError):
             SurfaceServer(**base)  # type: ignore[arg-type]

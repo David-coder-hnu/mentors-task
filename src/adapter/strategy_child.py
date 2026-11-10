@@ -37,6 +37,8 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import json
+import os
 import sys
 import traceback
 from collections.abc import Callable
@@ -93,6 +95,17 @@ def _hello(channel: LineChannel, timeout_hint: str = "") -> Reply:
             "复现；**不猜一个默认值**，因为猜出来的那次运行是不可复现的，"
             "而它跑出来的数看起来完全正常。"
         )
+    epoch_size = reply.result.get("epoch_size")
+    if not isinstance(epoch_size, int) or isinstance(epoch_size, bool) or epoch_size < 1:
+        raise SystemExit(
+            f"握手回复里的 epoch_size 不是正整数（得到 {epoch_size!r}）——"
+            "策略不知道决策节奏就不能与 M1/M2 及 B4 对齐。"
+        )
+    if not isinstance(reply.result.get("memory"), dict):
+        raise SystemExit(
+            "握手回复里没有 memory 对象——协议 v3 要求每次都显式送空快照或历史快照，"
+            "不能靠策略猜默认值。"
+        )
     return reply
 
 
@@ -124,7 +137,16 @@ def main(argv: list[str] | None = None) -> int:
     # **沙箱先于一切用户代码。** 装在 `load_entry` 之前，所以策略 import 进来的
     # 每一个模块都过检查；装在 `_hello` 之前，所以握手也跑在里面。理由与它的
     # 位置见模块 docstring，「A2 专用」为什么不取也在那里。
-    sandbox.install()
+    raw_roots = os.environ.get(sandbox.PROTECTED_ROOTS_ENV, "[]")
+    try:
+        extra_roots = json.loads(raw_roots)
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"{sandbox.PROTECTED_ROOTS_ENV} 不是合法 JSON：{exc}") from exc
+    if not isinstance(extra_roots, list) or not all(
+        isinstance(root, str) and root for root in extra_roots
+    ):
+        raise SystemExit(f"{sandbox.PROTECTED_ROOTS_ENV} 必须是字符串数组")
+    sandbox.install(sandbox.default_policy(extra_roots=tuple(extra_roots)))
 
     try:
         run = load_entry(args.entry)
@@ -140,6 +162,8 @@ def main(argv: list[str] | None = None) -> int:
             # 种子同理，而且它是**必填**的：`_hello` 已经保证它是个整数，
             # 所以这一行没有「取不到」的支路。见 `ProbeSurface.__init__`。
             seed=bootstrap.result["seed"],
+            epoch_size=bootstrap.result["epoch_size"],
+            memory=bootstrap.result["memory"],
         )
         run(surface)
         return 0

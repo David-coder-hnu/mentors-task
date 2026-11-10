@@ -536,7 +536,7 @@ v3 写的是「CI 下界高于最优基线的 CI 上界」。**outside voice #8 
 > **⚠️ v7（2026-10-08，T4 实现时发现）：`aliased_caught` 单独用可以被一个平凡策略打满，而两个共主端点里另一个拦不住它。**
 > 按定义，`aliased_caught` = 「正确识别的 aliased 前缀数」，于是**把每个前缀都声明成 aliased** 就取到上界。而 `aliased_waste_ratio` **只管探测花在哪，不管你怎么报**——多打一条 `report(p, True)` 不花预算。所以判据表第 1 行（「不劣于 + 至少一个显著优于」）存在一条退化路径：**不改进任何探测行为，只在声明的形状上做文章，就能在 co-primary 的一列上拿满分。**
 > **当下不是数据缺陷**：冒烟表的五行没有一条会走这条路——B0/B1 按构造不声明（结构性 0），B4/M1/M2 与 B5 都按实际判定声明。**但 A2 是会被交到 `report` 工具手里的 LLM**，而这条路径不需要它理解 aliasing，只需要它注意到端点定义。
-> **处置**：T4 已把 `aliased_false_positives` / `aliased_misses` 两列算出来，**让缺口有数可看**（打满的 run 与诚实的 run 在 `aliased_caught` 上完全相同，只在误报数上分开——这条已被 `test_the_gaming_run_and_the_honest_run_are_indistinguishable_on_caught_alone` 钉成测试）。**修它归 T14**：端点定义的归属地在那里。**这条不列为新的 critical gap**——它已经不是静默的了（有测试、有一个会显示出来的诊断列），静默的是它的**修法未定**。
+> **处置**：T4 先把 `aliased_false_positives` / `aliased_misses` 两列算出来，让缺口可见。**T14 已于 2026-11-09 修复**：每个 true 声明至少要 2 次探测和 2 次回包；无证据声明记 `aliased_unsubstantiated_claims`；声明精度低于 0.5 时 `aliased_endpoint_admissible=False`。预注册规则见 `docs/protocols/scoring_admissibility.md`。
 
 **为什么 `info_gain` 降级（outside voice #9 / #17）**：它的实体空间在 Stage 1 只有几十个前缀，`H(E) ≤ log₁₆(50) ≈ 1.4` hexit，而 `Probes` 是自适应选取、非独立同分布——**插入式熵估计量恰在这个区间有偏**。它仍是论文声称的贡献（P3）里最漂亮的一环，但**最漂亮的指标不该同时是最不可靠的那一个**。两个可数量有精确 config 真值、无估计量偏差、直接支撑陷阱叙事，因此顶上来做判据。
 
@@ -652,7 +652,7 @@ B0–B5 是基线，A1–A3 是被测对象与归因对照。**完整表（含 A
   > - **(i) 一个预算自适应的在线策略**，只是**借用** 6SEVEN 的判定规则（每步用已观察到的响应更新对前缀的判断，并据此分配剩余预算），还是
   > - **(ii) 就是 6SEVEN 那次 18 探扫描**，与「预算 1000」是两个不可调和的预算模型？
   >
-  > **这件事现在定不下来，因为本地没有 6SEVEN 源码可查**（`src/` 尚不存在，Punching Bag 与 6SEVEN 都未 checkout）。**所以不是把它推迟，而是把它排进计划**：Stage 2 起点的第一个动作就是读 6SEVEN 的 `online alias detection` 实现，然后**写定归类**——若取 (i)，B5 的预算模型与其余策略可比；若取 (ii)，必须**明确写出为何它不受 `:704` 的否决约束**（`:704` 否决的是"复用它的插件层当测量框架"，不是"把它的判定规则当作已知算法来实现一个基线"——**这个区分要在文档里写出来，不能靠读者自己推**）。
+  > **已定案（2026-11-09）：取 (ii)。** 阅读 6SEVEN 上游 commit `f22f6670790912e8b5eb8b01c7280988b6a2f4b3` 后确认：online alias detection 是固定六长度 × 三探的检测组件，会按候选地址排队，但不自行跨前缀分配预算。B5 应由“6SEVEN dealiasing + 显式发现分配器”组成，两部分共享同一预算；它不是 6SEVEN 插件层或完整扫描器的复现。证据与预算推论见 `docs/protocols/b5_6seven_classification.md`。
 
 **A1 vs A2 的差别就是 P1 的全部内容**：A1 是封闭工具池（正是 subagent 批评的"动作空间啰嗦的 RL agent"），A2 允许构造新原语。**两者之差就是"开放动作空间"这个卖点是否成立。**
 
@@ -705,7 +705,7 @@ B0–B5 是基线，A1–A3 是被测对象与归因对照。**完整表（含 A
    ┌──────────────────────┬──────┬─────────────────────────────────────────────┐
    │ 层                   │ 覆盖 │ 已点名的路径（T8 逐行勾）                   │
    ├──────────────────────┼──────┼─────────────────────────────────────────────┤
-   │ Code paths           │ 0/21 │                                             │
+   │ Code paths           │ 21/21│ 所有路径均有测试，见 `docs/test_coverage.md` │
    │  adapter/            │      │ surface.probe / surface.sample /            │
    │                      │      │ surface.report / surface.reset /            │
    │                      │      │ oracle.ground_truth / oracle.reset_target / │
@@ -718,13 +718,13 @@ B0–B5 是基线，A1–A3 是被测对象与归因对照。**完整表（含 A
    │  runner/             │      │ 预算台账（epoch 粒度预留）/ 反压 /          │
    │                      │      │ 丢包对账 / 排空窗口 W                       │
    ├──────────────────────┼──────┼─────────────────────────────────────────────┤
-   │ Runner flows         │ 0/10 │                                             │
+   │ Runner flows         │ 10/10│ 所有流程均有测试，见 `docs/test_coverage.md` │
    │                      │      │ 单探测成功 / send_failed / sent_no_reply /  │
    │                      │      │ 并发串包 / 迟到回包 /                       │
    │                      │      │ 队列满丢包 → 整轮无效 / 超预算 → 拒绝 /     │
    │                      │      │ 缓存命中 / 缓存未命中 / reset 隔离          │
    ├──────────────────────┼──────┼─────────────────────────────────────────────┤
-   │ GAPS                 │  31  │ 上面 21 + 10 全部无测试（`src/` 为空）      │
+   │ GAPS                 │   0  │ T8 已逐项建立映射                            │
    └──────────────────────┴──────┴─────────────────────────────────────────────┘
    ```
 
@@ -1402,7 +1402,7 @@ class Oracle:                # runner 侧持有，策略进程拿不到（进程
     - **预算口径：`send_failed` 也进分子。** `BudgetLedger.charge()` 先扣后跑（`runner.py:79`），所以发包失败的钱**已经花了**。把它从分母剔掉，等于让「根本没发出去」比「发出去了没回来」更便宜——而这是个**比率**端点，分母一动结论就动（`:736` 那条关于容差的推理是同一个道理）。同理，落不进任何 truth 前缀的探测**进分母不进分子**（钱花了，但没花在 aliased 上）；把它从两边一起删掉就等于让「探错地方」免费。
     - **重复声明取「后者胜」，并且把翻供数出来。** 声明是一个按序的 `list` 不是 `dict`（`SurfaceServer.reports`）。「预算耗尽前**正确识别**」读作**运行结束时的最终判断**，所以先报 `True` 后报 `False` 算没抓住——否则等于奖励一次后来被自己否掉的猜测。翻供记一列 `report_flip_flops`：**不抛异常，但也不静默**（可能是「先猜后修正」，也可能是在试探评分器）。与靶场读 config 的「重复前缀后者胜」行为一致，但**理由不同**：那边是实现细节，这边是端点定义的读法。
     - **`Score.__post_init__` 里有一条会红的恒等式**：`aliased_caught + aliased_misses == aliased_prefixes_total`。aliased 前缀被「最终声明为 True」与「没有」两分，所以这两块必须**恰好铺满**整个 aliased 集合——任何一边漏掉一条分支（忘了排除 off-target、去重去错了），构造 `Score` 当场就炸，而不是等有人读表时才发现。**它是本模块唯一一条同时钉住两个端点列的对账。**
-    - 🔴 **发现（新，未修）：`aliased_caught` 单独用是可以被博弈的。** 按定义，它在「把每个前缀都声明成 aliased」这个平凡策略上取到**最大值**，而两个共主端点里**另一个也不惩罚声明**（`aliased_waste_ratio` 只管探测花在哪，不管你怎么报）。于是存在一条退化路径：不改进任何探测行为，只把 `report(p, True)` 打满。**当前冒烟表的五行没有一条会走这条路**（B0/B1 不声明；B4/M1/M2 与 B5 都按实际判定声明），所以它**不是今天的数据缺陷，是端点定义的缺口**——而 A2 是会被交到 `report` 工具手里的 LLM。**已把 `aliased_false_positives` 与 `aliased_misses` 算出来让缺口有数可看**；**修它归 T14**（端点定义的归属地），见该任务块的 v7 追加。
+    - ✅ **缺口已修（T14，2026-11-09）**：原缺口是「把每个前缀都声明成 aliased」可打满 caught。现在 true 声明须有至少 2 次探测、2 次回包证据；无证据声明单独计数；声明精度低于 0.5 的 run 不可用 aliased 端点判胜。规则见 `docs/protocols/scoring_admissibility.md`。
     - **变异验证**（本仓库第三次对测试自己下手，六个承重决定逐个改错）：`send_failed` 不计入分子 **1 红**；归属退化成正序（最短前缀）**1 红**；重复声明改成先者胜 **1 红**；`misses` 不再由 `caught` 推出 **7 红**（恒等式当场炸）；声明要求逐字命中 **2 红**；回包不回包都算「真有内容」**1 红**。六处全部当场变红，无一条是「函数被调用了」式的空转。
   - **v6：`src/scoring/entropy.py` 移出 Stage 1，改落 Stage 2 起点。** 理由：`info_gain` 已被 D8 降为次要诊断量，**而它此前和主端点挤在同一个 Stage 1 交付里**——于是"跑出冒烟表"这件事被一个不承重的估计器拖住。**Stage 1 的 `score()` 只算可数端点**（`aliased_waste_ratio` / `aliased_caught`，见 T14）；`entropy.py` 连同它的**小样本偏差标定测试**一起移到 Stage 2，**放在"确认次要指标是否值得报"那一步**（OQ 7 的 v4 结论）。
 - [x] **T5 (P1, human: ~1d / CC: ~1h)** — `src/agent/` — LLM 决策体 + 决策缓存（键含 prompt/工具池内容哈希）✅ **完成于 2026-10-09**（含 v7 追加的四条判断与一条接口发现）
@@ -1440,33 +1440,35 @@ class Oracle:                # runner 侧持有，策略进程拿不到（进程
       | `save()` 行不排序 | 原用例存的是**同一个对象两次**，插入顺序当然一样 | 加"同内容、不同插入顺序 ⇒ 逐字节相同" |
       | `prefix_for` 取第一个匹配 | 原用例里最长前缀恰好**排在最后**，"取最后一个"照样对 | 加三层嵌套用例（最长那个在排序里不落在两端） |
     - **顺带更正**：`tests/unit/test_isolation.py` 由 28 条增至 **31** 条——新增 `src.agent` 的导入图、评分层前缀黑名单、以及一条**`src.agent` 不许能联网**（`socket` / `ssl` / `http.client` / `urllib.request` 一个都不许被拖进来）。最后一条防的是"顺手 `import requests` 兜个底"：那会让**回放**在一份不完整的缓存上悄悄联网（见 `decide.py` 的离线回放模式），而报告里写着它是复现。
-- [ ] **T6 (P1, human: ~2d / CC: ~2h)** — `src/baselines/` — B1–B5，B5 按 6SEVEN online alias detection 实现
+- [x] **T6 (P1, human: ~2d / CC: ~2h)** — `src/baselines/` — B1–B5，B5 按 6SEVEN online alias detection 实现
   - Surfaced by: Step 0 [Layer 1] 发现 6SEVEN；以及 B5 公平性协议
   - Files: `src/baselines/b1..b5.py`
   - Verify: B3 的 bit-reversal offset 规则单测；B5 的 6 长度 × 3 探逻辑单测
   - **v5 拆成两条（C12 / T6 拆分）**：原 T6 把 B1–B5 当**一次交付**，但按 C12 的冒烟口径，**它们分属两个阶段**——B1/B4 在 **Stage 1 冒烟表**里（与 M1/M2 同场），B2/B3/B5 在 **Stage 2 的完整八行表**里（B5 还要等 6SEVEN 源码读完、归类写定之后才能动）。**这不是把工作量拆小，而是把交付时点拆开**：
     - **T6a（Stage 1，P1，human: ~0.5d / CC: ~20min）** — `src/baselines/b1.py`、`b4.py`（B1 均匀随机、B4 响应率自适应 bandit）。Verify 同上，去掉 B5 项。**✅ 完成于 2026-10-10**（完成块在文末；**实际文件名是 `b1_uniform_random.py` / `b4_response_bandit.py`**，与本行的简写不一致的理由见文末 T6a 完成块第三节）。
-    - **T6b（Stage 2，P1，human: ~1.5d / CC: ~1.5h）** — `src/baselines/b2.py`、`b3.py`、`b5.py`。**B2 改名为响应密度贪心**（见「种子与 6Sense 的喂食规则」段），**B5 的归类未定前不得开工**（先读 6SEVEN 源码定 (i)/(ii)）。
+    - **✅ T6b（Stage 2，P1，human: ~1.5d / CC: ~1.5h）** — `b2_response_density.py`、`b3_bit_reversal.py`、`b5_frp_aware.py` 已完成（2026-11-09）。B2 是响应密度贪心；B3 是 bit-reversal；B5 是 6SEVEN 固定 dealiasing + bit-reversal 发现分配器。
     - **B0 不在此列**——它始终归 **T13**（退化警报），与基线交付脱钩。**（已交付：`src/baselines/b0_probe_all.py` —— 见文末 T13 完成块。）**
-    - **T6c（Stage 1，P1，human: ~1d / CC: ~1h）** — `src/baselines/m1.py`、`m2.py` — **记忆族两行**。
+    - **✅ T6c（Stage 1，P1，human: ~1d / CC: ~1h）** — `src/baselines/m1_memory_cold.py`、`m2_memory_warm.py` — **记忆族两行已完成（2026-11-09）**。
       - **⚠️ 先补定义，再写代码（v6 新增，本任务的第一件事）**：`M1`（记忆族·冷启动）与 `M2`（记忆族·有历史）**在全文档里只有 `:567` 那半句标注，没有任何行为定义**——不知道它们由 LLM 驱动还是手写启发式、"记忆"存的是什么、冷启动与有历史的差别落在哪个字段上。**而 Stage 1 冒烟表的主比较正是 `M2 vs B4`**（`:638`）：**要测的那个差出自两行没有定义的行**。这不是"文档缺一段说明"，是**主比较的自变量没有定义**——定义没写死之前，T6c 不得开工。
       - Files: `src/baselines/m1.py`, `src/baselines/m2.py`（**若定为 LLM 驱动，改落 `src/agent/`，并成为 T5 的下游**）
       - Verify: M1 与 M2 在**首 epoch 的状态必须逐字段相同**——否则两行之差里混进了非记忆因素，主比较直接失效；若为 LLM 驱动，同 seed 重跑必须全部命中 T5 的决策缓存（命中率 100% 是"记忆机制生效"的定义）
   - **B5 公平性协议的四个约束（v6 新增 / D19）**——`:645`（原先误写为 `:513`）写着 B5 与 A2 享有「**同等权利**」，但**「权利」不是「预算」**：「判据 #8」那条 2×2 杀死矩阵（原先误写为 `:585-590`，那几行是 config 字段不是矩阵）整个悬在 B5 能否兑现这个权利上——**若 B5 事实上拿不到与 A2 相同的投入，"B5 也做到了"那一格就永远填不上，矩阵退化成单格**。所以「同等权利」必须落成可执行的四条：
     1. **同预算**：B5 与 A2 拿到**相同的探测预算与相同的 epoch 数**，同一个 `api_cost_cap` 口径（若 B5 不用 LLM，其调用量为 0，仍要在表里写明）。
     2. **同信息**：B5 只能看 `ProbeSurface` 能给的 `Response` 字段——**与 A2 逐字段相同**，不得喂任何 A2 看不到的东西。
-    3. **同工具池**：B5 可用的原语集合 = A2 的初始工具池（A2 可以构造新原语，B5 不能——**那正是两条线的差，也正是 P1 要测的东西**）。
+    3. **同工具池**：B5 与 A2 的**初始**原语集合相同；B5-open 同样有权在评测前构造新原语，A2 则可在运行中构造。两条都受同一 `K` 次构造尝试与同一验证器约束；B5-closed 的“固定工具池”只作消融。见 `docs/protocols/equal_effort.md`。
     4. **同裁决人**：B5 是否"做到了"由**非场景作者**裁决，与 A2 的成败同一个人、同一套标准（Reviewer Concern #2）。
-- [ ] **T7 (P2, human: ~1d / CC: ~1h)** — `external/6sense/` — 6Sense 独立轨道
+- [x] **T7 (P2, human: ~1d / CC: ~1h)** — `external/6sense/` — 6Sense 独立轨道
   - Surfaced by: Issue 2A；Open Question 6（能否跑通未验证）
   - Files: `external/6sense/`, `scripts/run_6sense.sh`
   - Verify: 用已知 aliased 前缀列表跑通，复现论文表 2 的「0 次探测投给 aliased 前缀」
-- [ ] **T8 (P2, human: ~4h / CC: ~30min)** — `tests/` — **按覆盖图补齐 31 条已点名路径的测试**
+  - **2026-11-10 完成兼容轨道。** 在 macOS arm64 的 Linux/arm64 Docker 中锁定并原生编译 `scanv6@67f6ceca…` 与 `offline-dealiaser@e357120b…`。4 个已知 aliased seed 全部由 `aliasv6` 拦截，进入 scanner 的 aliased 地址为 0；2 个 clean seed 进入 `scanv6` 模拟并在 100% hit-rate 下命中。结果见 `docs/results/t7-6sense-compat-2026-11-10.md`。
+  - **边界：** 该轨道精确覆盖 T7 的 dealiasing Verify，但不运行 6Sense LSTM 生成器，也不声称完整 Punching Bag 表 2 全流程等价。完整 GPU/checkpoint 轨道仍保留在 `scripts/run_6sense.sh`。
+- [x] **T8 (P2, human: ~4h / CC: ~30min)** — `tests/` — **按覆盖图补齐 31 条已点名路径的测试**
   - Surfaced by: `## Success Criteria` → Stage 1 完成判据 **第 5 条（测试覆盖图）**
   - Files: `tests/`
   - Verify: `pytest` 全绿；**覆盖图里每一行都有一个对应测试函数**（图中四层：Code paths 21 / Runner flows 10 / GAPS 31）
   - **v6 三处更正**：**(i)** 原句写"补齐 16 个测试 GAP"、"`3/19 → 目标 19/19`"——**两个数都是过期的**，且当时的覆盖图**只存在于对话里，不在文档里**，所以下一个人无从勾对。**现在覆盖图已写进判据第 5 条**，本任务的验收改为**引用那张图**。**(ii)** GAP 数从 16 变 31，**不是因为要求变多，是因为这次是把文档里已点名的路径全清点了一遍**（原 19 条是评审当时的即时清点）。**(iii)** 图中**四条必须进 CI**：能力隔离（D7）、`RouterShim` 契约（D9）、缓存键跨 `PYTHONHASHSEED` 稳定（T5(b)）、日志侧包集合逐次相等（判据 6(i)）——**这四条是 T17 的内容，不是本任务的可选项**。
-- [ ] **T9 (P3, human: ~2h / CC: ~20min)** — `TODOS.md` — 建立并迁入推迟项
+- [x] **T9 (P3, human: ~2h / CC: ~20min)** — `TODOS.md` — 建立并迁入推迟项
   - Surfaced by: NOT in scope 表
   - Files: `TODOS.md`
 
@@ -1482,11 +1484,11 @@ class Oracle:                # runner 侧持有，策略进程拿不到（进程
     1. **🔴 一条此前没有任何落点的接口约束**：数据流图把**决策缓存画在 runner 进程里**，而同一张图的第 ③ 条边与 `## 约束` 段的沙箱规则都写着「策略进程不得读决策缓存文件本身」。**两处合起来的意思是 `DecisionCache` 是能力、不是许可**——T5 交付了能力（`src/agent/cache.py`），**许可与路径归 T10**。若要走 stdio 搬查询，得动 `protocol.CLIENT_VERBS`（白名单，加动词必须同步 `PROTOCOL_VERSION`），那是 T2 的协议面。**T5 之前这条约束在文档里一个落点都没有**，现在写在 `cache.DecisionCache` 的 docstring 与 `src/agent/__init__.py` 的模块 docstring 里。
     2. **`src/agent/` 也进 D7 的导入图断言**：`surface` 干净不代表 `agent` 干净——两者是策略进程里两条独立的导入路径。T5 在 `tests/unit/test_isolation.py` 新增 `TestAgentImportGraph` 三条：`src.agent` 不得拖进真值/runner 侧、不得拖进**整个 `src.scoring`**（前缀匹配，不是列名字）、**不得拖进任何网络客户端**（`socket` / `ssl` / `http.client` / `urllib.request`；最后一条防的是"顺手 `import requests` 兜个底"，那会让**回放**在一份不完整的缓存上悄悄联网）。**本任务 Verify 里那几条黑名单，往 `src/agent/` 上加时照抄这个形状。**　**v8：T10 照抄了，并往同一张 `FORBIDDEN` 表里补了一条 `src.adapter.ground_truth`**——它是**把 `config/` 变成真值的那一步**，而且它自己的导入图是干净的（只读文件），所以「导入图干净」与「拿不到答案」在这里**不是同一件事**。见文末完成块第七节。
     3. **路径更正**：上面 Files 写的 `tests/test_isolation.py` 实际在 **`tests/unit/test_isolation.py`**（`pyproject.toml` 的 `testpaths = ["tests"]`，单测进 hosted CI、集成测试用 marker 排除）。该文件现 **38** 条（T10 又加 4 条：`TestTheSandboxIsOnTheRealChild`）。
-- [ ] **T11 (P1, human: ~1d / CC: ~1h)** — `src/scoring/stats.py` — **配对检验 + 多重性校正 + 分布报告**
+- [x] **T11 (P1, human: ~1d / CC: ~1h)** — `src/scoring/stats.py` — **配对检验 + 多重性校正 + 分布报告**
   - Surfaced by: 评审 D8 — outside voice #8（CI 不重叠 ≈ p<0.005，制造假阴性；浪费同 seed 配对）
   - Files: `src/scoring/stats.py`, `src/scoring/report.py`
   - Verify: 在合成数据上验证配对检验的功效应高于 CI 不重叠；Holm–Bonferroni 的校正因子单测；报告含每 seed 分布
-- [ ] **T12 (P1, human: ~1d / CC: ~1h)** — `src/agent/objective.py` — **定义 Agent 的在线代理量**
+- [x] **T12 (P1, human: ~1d / CC: ~1h)** — `src/agent/objective.py` — **定义 Agent 的在线代理量**
   - Surfaced by: 评审 D7 — outside voice #7（`info_gain` 需要预言机，Agent 观察不到，因果不成立）
   - Files: `src/agent/objective.py`, `src/agent/prompts/`
   - Verify: 单测代理量仅依赖 `Response`；论文中显式声明代理量与 `info_gain` 的关系
@@ -1501,7 +1503,7 @@ class Oracle:                # runner 侧持有，策略进程拿不到（进程
     - `W`：**写死一个数**，且**定义为排空上限 + 一旦在途集合为空即提前退出**（不是固定等满）。
     - `api_cost_cap`：按 `策略数 × (1000 / epoch_size) × N` 推出的调用量上限。**本文档不填这个数**——它取决于单价与预算意图（见「LLM 身份与可复现性」段的 v6(b)）。
     - **门 1 的挂钟上限**：`Σ(探测数 / epoch_size × W) + 并发后的包时间 + LLM 往返延迟`，**超了就是配置错了，不是机器慢**。
-- [ ] **T14 (P1, human: ~3h / CC: ~30min)** — `src/scoring/endpoints.py` — **主终点改为可数量**（`aliased_waste_ratio` / `aliased_caught`）
+- [x] **T14 (P1, human: ~3h / CC: ~30min)** — `src/scoring/endpoints.py` — **主终点改为可数量**（`aliased_waste_ratio` / `aliased_caught`）
   - Surfaced by: 评审 D8 — outside voice #9/#17（熵估计量在小实体空间有偏，而 Stage 1 实体只有几十个）
   - Files: `src/scoring/endpoints.py`, `src/scoring/score.py`
   - Verify: 两个极端用例 + 与 `info_gain` 的一致性检查（可数量应单调于 info_gain 但无估计量偏差）
@@ -1510,7 +1512,7 @@ class Oracle:                # runner 侧持有，策略进程拿不到（进程
     - **(a) 端点本身已经落地了——在 T4 不是在这里。** T4 已在 `src/scoring/score.py` 里实现 `aliased_waste_ratio` / `aliased_caught` / `discovered_real_prefixes`，**外加两个极端用例**（那正是 T4 的 Verify）。所以 T14 从「写端点」变成**「把端点定义抽进 `endpoints.py`，并做下面三件 T4 做不了的事」**。抽出的动机不是洁癖：`score.py` 现在同时承担「归属与折分」和「端点定义」两件事，而 T14 要改的正是后者——**不先分开，改定义就得动折分**。**「结构性 0」那条 Verify 归 T14**：T4 只测到「没有声明 ⇒ caught 为 0」，而「B0/B1 按构造不声明」是跑起来才知道的（要等 T6c/T6a 的基线在场）。
     - **(b) 🔴 新增工作项：修 `aliased_caught` 的可博弈性。** 见「主端点与胜负判据」段的 v7 注：把每个前缀都声明成 aliased 就能把这一列打满，而另一个共主端点不惩罚声明。**T4 只做到了「让它可见」**（多算 `aliased_false_positives` / `aliased_misses` 两列）。**修法是 T14 的活，且必须按 `:532` 预注册**——它是判据，不是实现细节。几个方向（**不是选型结论，是待评估的候选**）：给这一列配一个精度伴生量（如「误报数不得显著高于对照」进判决规则）；把「正确识别」收紧为「该前缀被探过且有证据」；或把误报直接并入 co-primary 的第三条。**注意方向 2 单独用很弱**——打满的 run 只要给每个前缀发一次探测就绕过去了（1000 的预算里花掉 4 次），所以它最多是一条附加约束，不是解法。
     - **(c) ⚠️ 本任务原 Verify 的第二半在 Stage 1 已经不可执行，要重述。** 原句是「与 `info_gain` 的一致性检查（可数量应单调于 `info_gain` 但无估计量偏差）」——而 **v6 已把 `entropy.py` 连同 `info_gain` 估计器移出 Stage 1**（`:1225`：`info_gain` 是次要量，却和主端点挤在同一个 Stage 1 交付里）。**Stage 1 里没有 `info_gain` 可对**，所以这条检查要么移到 Stage 2 起点（估计器落地时一起做），要么换成一条不依赖它的形式（例如「两个可数量在合成数据上对已知真值精确相等」）。**保留原句会造成一种很难查的失败**：T14 完成时按字面去对一个不存在的量，而"对不上"看起来像端点错了。
-- [ ] **T15 (P2, human: ~1d / CC: ~1h)** — `src/adapter/router_shim.py` — **`RouterShim` 替代 fork 包路径**
+- [x] **T15 (P2, human: ~1d / CC: ~1h)** — `src/adapter/router_shim.py` — **`RouterShim` 替代 fork 包路径**
   - Surfaced by: 评审 D9 — outside voice #13/#18（fork 是最高风险项且无估算；真值只需 Response 层）
   - Files: `src/adapter/router_shim.py`, `tests/test_shim_contract.py`
   - Verify: 手工拓扑上逐字段比对合成 `Response` 与期望；合成的 `src` 集合 == `GroundTruth.routers`
@@ -1519,10 +1521,11 @@ class Oracle:                # runner 侧持有，策略进程拿不到（进程
   - Files: `src/agent/ablation.py`, `src/agent/prompts/ablated/`
   - Verify: 消融 prompt 里不含任何 IPv6 术语；A3 与 A1/A2 的同 seed 配对比较
   - **⚠️ v5：本任务当前 BLOCKED，不得开工（OV-10 / C12 #16）。** 上面那条 Verify 是**失效的验收标准**——「prompt 里不含 IPv6 术语」测的是措辞，不是知识（知识在预训练权重里）。**解除条件**：P1 段的重设计要求落地（能单独动领域知识、其余逐字段不变且可断言）。**解锁时点**：Stage 1 冒烟表首组数据之后。**解除后须同步确认族规模**（30 或回到 28）。
+  - **2026-11-10：A1/A2/A3 工程闭环完成，真实模型表仍待外部输入。** `OpaqueEncoding` 已接入 `run_a3`；A3 与 A2 使用相同开放工具池，但前缀/状态/动作只暴露 opaque token。最终声明改由三行共用的确定性规则生成，消除了旧版 A2 第二次模型调用的 300 秒阻塞。3 行 × 30 seeds × 1,000 探 fixture 矩阵跑完，900 次决策缓存回放 900/900 命中，A3 与 A2 在相同 seed 上逐项一致。真实模型表需要轮换后的 provider 凭据、明确 `api_cost_cap` 与冻结模型身份；fixture 不得作为 P1 或知识消融结论。证据见 `docs/results/t16-engineering-2026-11-10.md`。
 
 ### v6 新增任务（T17–T19）
 
-- [ ] **T17 (P1, human: ~2h / CC: ~20min)** — `.github/workflows/test.yml` — **最小 CI pipeline**
+- [x] **T17 (P1, human: ~2h / CC: ~20min)** — `.github/workflows/test.yml` — **最小 CI pipeline**
   - Surfaced by: 架构 #5 —— `## Distribution Plan` 写「无 CI/CD 需求」，而 `## NOT in scope` 表写「有**两处必须进 CI**」，**同一份文档两句话直接打架，且没有任何任务负责建它**
   - Files: `.github/workflows/test.yml`, `pyproject.toml`（或 `pytest.ini`）, **`Makefile`**（v9 增补 —— 门 1 条件 2 的 netns 半边就落在它身上，理由见本任务的「范围」行与文末 T20 块第九节）
   - Verify: **四条不可失败项必须全绿**，缺一条就是 CI 没起作用：
@@ -1532,12 +1535,12 @@ class Oracle:                # runner 侧持有，策略进程拿不到（进程
     3. **缓存键跨 `PYTHONHASHSEED` 稳定**（T5(b)）——两个 seed 值下键相等
     4. **日志侧包集合逐次相等**（判据 6(i)）——同一 config + 同 seed 两次 run 的包集合精确相等
   - **范围**：跑 `pytest tests/`；**需要 netns / Docker 的集成测试用 skip 标记排除**（与「单测进 hosted CI、netns 留本地」的决定一致）。**不做通用 CI/CD 流水线**——这不是产品。**（v9 增补：门 1 条件 2 的 netns 那一半也归本任务 —— 用户 2026-10-10 裁决「并进 T17」。落地处是 `Makefile` 的 `smoke-table` 目标，它今天**不能跑**，缺三样东西且缺哪一样都会让结果看起来正常：(1) 靶场没按 Stage 1 的 config 起（挂的是 T1 的 smoke 脚手架；这件事 T13 已具名记在 `:1780`，当时**没有归属**）；(2) 缺宿主侧编排脚本，形状与 `scripts/perf_sweep.py` 完全相同（起靶场 → 容器内跑编排层 → **停靶场** → 读账本，第三步不可省）；(3) 冒烟表 5 行里 4 行缺种子通道（归 `T6a`）。三条都写进了 Makefile 的拒绝信息里 —— 这个目标**大声拒绝，不返回一张看起来完整的表**。同时 `.gitattributes` 给它钉了 `eol=lf`：配方行以 TAB 开头，行尾的 `\r` 会被当成命令的一部分。见文末 T20 块第九节。）**
-- [ ] **T18 (P1, human: ~4h / CC: ~30min)** — `config/heldout/` + `scripts/make_heldout.py` — **留出集拓扑与配置生成**
+- [x] **T18 (P1, human: ~4h / CC: ~30min)** — `config/heldout/` + `scripts/make_heldout.py` — **留出集拓扑与配置生成**
   - Surfaced by: outside voice P1（v6 / D18）——CEO plan 门 2 条件 3 要求「留出集调参协议」，原话是「**这条不修就整个实验作废**」，**但全文检索「留出集 / held-out」只出现在那一条要求里**：没有任何任务产出过留出集。**要求写了，交付物不存在。**
   - Files: `config/heldout/*.json`, `scripts/make_heldout.py`, `tests/test_heldout_disjoint.py`
   - Verify: **留出集的拓扑与 config 必须与调参集不相交**（前缀集合、aliased 分布、响应率分布三者都断言）；生成脚本固定 seed 且可重跑
   - **它服务什么**：B5 的判定规则与所有基线的超参**只能在一个集合上定**，主表在**另一个集合**上跑。**否则「八行表」量的是「谁更会过拟合这份 config」**——而这恰好是最容易发生、又最难在事后发现的一类错误。
-- [ ] **T19 (P2, human: ~2h / CC: ~20min)** — `docs/protocols/equal_effort.md` — **对等投入协议**
+- [x] **T19 (P2, human: ~2h / CC: ~20min)** — `docs/protocols/equal_effort.md` — **对等投入协议**
   - Surfaced by: outside voice P1（v6 / D19）——`:645`（原先误写为 `:513`）给 B5 的「同等权利」是**权利，不是预算**，而 2×2 杀死矩阵整个悬在 B5 能否兑现它
   - Files: `docs/protocols/equal_effort.md`
   - Verify: 四条约束逐条可执行、可审计（**同预算 / 同信息 / 同工具池 / 同裁决人**，全文见 T6 之后的段落）；每条都要写出**怎么核对**，不是怎么写好听
@@ -2244,3 +2247,329 @@ score_i = rewards_i / pulls_i + sqrt(2 · ln N / pulls_i)
 | 设计文档写回 | 本块整段追加 + **两处同行替换**（`:1448`、`:2058`），全文 **2060 行不变** |
 
 **没有引入任何第三方运行时依赖**——`b1_uniform_random.py` 只 import `random` 与仓库自己的模块，`b4_response_bandit.py` 只多一个 `math`。仓库「零运行时依赖」的性质不变。
+
+## T18 完成块（2026-11-09）—— 留出集、分布平移与一条跨平台沙箱修正
+
+> **为什么追加在文末。** 遵循本仓库的零行号漂移规矩：正文只把 T18 的复选框
+> 改成完成，交付说明整段追加，不插入既有正文。
+
+### 一、交付了什么
+
+| 文件 | 内容 |
+|---|---|
+| `scripts/make_heldout.py` | 固定 seed 的留出集生成器；用 SHA-256 排序，不依赖内建 `hash()` |
+| `config/heldout/stage1_heldout.json` | 32 个 `/64` 的 Stage 1 留出集真值 |
+| `tests/test_heldout_disjoint.py` | 12 条测试：可复现、前缀集合不相交、aliased 组成不同、响应率分布不同、真值可导出 |
+| `Makefile` | 新增 `make heldout` |
+
+留出集全部位于 `2001:db8:a5::/48`，与调参集的 `2001:db8:5::/48` 不重叠。
+默认生成 seed 固定为 `20261109`；同 seed 重跑得到逐字节相同的 JSON。
+
+### 二、为什么不是「只换前缀」
+
+只换地址仍然允许模型或手写规则记住调参集的难点分布。因此留出集同时做了两类
+分布平移：
+
+| 项 | 调参集 | 留出集 |
+|---|---|---|
+| aliased | 8 / 32 | **6 / 32** |
+| content-mid | 6，rate 0.30 | **7，rate 0.35** |
+| content-low | 6，rate 0.10 | **7，rate 0.08** |
+| content-sparse | 4，rate 0.02 | **4，rate 0.01** |
+| tier-hot | 3 EUI + 2 byte | **2 EUI + 2 byte，rate 0.90 / 0.65** |
+| silent | 3 | **4** |
+
+预算 `300`、`epoch_size=20`、`W_s`、模型身份等实验口径原样保留。留出集检验的是
+拓扑与响应率上的泛化，而不是一条被悄悄改短的预算。
+
+### 三、Verify 的落点
+
+1. **前缀集合不相交**：两个 config 的规范化 `/64` 集合交集为空。
+2. **aliased 分布不同**：角色计数表直接断言，留出集恰为 6 个 aliased。
+3. **响应率分布不同**：按 `(role, 四档 rate)` 的重复计数表比较，二者不相等。
+4. **可重跑**：同 seed 的渲染文本完全相等；换 seed 只改行序，不改组成。
+5. **仍是真值**：`read_subnets()` 零跳过、零冲突，`stage1_truth_from_config()`
+   导出 32 个前缀。
+
+宿主完整套件实测 **588 passed / 7 skipped**。用留出集跑离线 B0（seed 0–2）
+得到 `waste=0.1867`，说明同一编排入口能读取留出集；这仍然是排练数据，不进入
+任何研究结论。
+
+### 四、附带修复：macOS 大小写不敏感文件系统
+
+`SandboxPolicy.root_of()` 原先只做 `Path.is_relative_to()` 的词法比较。macOS
+默认 APFS 不区分大小写，`CONFIG/stage1_config.json` 实际会打开
+`config/stage1_config.json`，但 `POSIXPath` 仍认为两者不同，于是受保护根存在
+一条真实可读的别名。
+
+修法是在词法判断之后，对现存祖先调用 `os.path.samefile()`；它比较文件系统身份，
+而不是字符串，也不读取文件内容，所以不会在审计钩子里递归。对于大小写敏感的
+Linux 文件系统，`CONFIG/` 不是 `config/` 的别名，对应参数化测试会 skip，而不是
+制造假红。
+
+### 五、没有做的事
+
+- 留出集只定义拓扑与真值，**没有**新增独立 Docker Compose profile，也还没有
+  自动起 `2001:db8:a5::/48` 路由的宿主侧编排。这仍归 T17 的 netns 半边。
+- 留出集尚未进入 Stage 2 八行表，因为 B5/T6b 与完整调参协议还没有落地。
+- 它不提供任何外部有效性；仍是 `2001:db8::/32` 文档地址空间内的合成靶场。
+
+## T6c 完成块（2026-11-09）—— M1/M2 记忆族与协议 v3
+
+### 一、行为定义
+
+M1 与 M2 共用同一个 UCB1 底座。两者只在跨 run 历史这一点不同：
+
+- **M1（冷启动）**：每趟从全零 `pulls/rewards` 开始，忽略握手里的历史，不回写。
+- **M2（有历史）**：读取本策略自己的 `pulls/rewards` 快照，本趟继续累计，
+  收尾通过 `remember` 回写。
+
+记忆只允许每个任务前缀的两个非负整数：`pulls` 与 `rewards`，且
+`rewards <= pulls`。字段多一个、前缀越界、布尔冒充整数或负数都会在策略侧和
+runner 侧同时拒绝。它不携带真值、其他策略记录、决策缓存或任意扩展字段。
+
+### 二、协议与代码
+
+协议从 v2 升到 **v3**：
+
+- `hello` 新增 `epoch_size` 与 `memory`；
+- `CLIENT_VERBS` 新增 `remember`；
+- `ProbeSurface` 暴露只读 `epoch_size` 与记忆副本；
+- `SurfaceServer` 持有权威记忆快照；
+- `run_matrix` 按策略维护跨 seed 的 M2 历史。
+
+新增 `memory.py`、`memory_bandit.py`、`m1_memory_cold.py`、
+`m2_memory_warm.py`。B4 也改为从握手读取 `epoch_size`，原先的第二份常量已删除。
+
+### 三、验证
+
+- `test_memory.py` 覆盖 schema、越界、记忆副本与首 epoch 同形；
+- `test_m1_m2.py` 验证首 seed 相同、M2 第二 seed 累计到 600 pulls；
+- 离线 seed 0–1：M2 的 waste 从 `0.6667` 变为 `0.8533`；
+- Stage 1 真靶场 seed 0：B4/M1/M2 均为 `waste=0.4833`、`caught=8`，
+  M1/M2 首 run 相同，符合冷启动定义。
+
+因为 M1/M2 已确定为确定性 UCB1，不调用 LLM；T6c 原 Verify 中“若为 LLM 驱动，
+重放缓存命中 100%”这一条件分支不生效。
+
+## T14 完成块（2026-11-09）—— aliased 端点证据与精度门槛
+
+`aliased_caught` 现在只接受有证据的正确 true 声明：
+
+- 至少两次探测；
+- 至少两次回包；
+- 最终声明为 `True`；
+- 能归属到 truth 前缀。
+
+证据不足的声明计入 `aliased_unsubstantiated_claims`。声明精度定义为
+`caught / (caught + false_positives)`；无 true 声明时为 `None`。精度低于
+`0.5` 或有任何无证据声明时，`aliased_endpoint_admissible=False`，该 run 不得
+用 aliased 端点宣胜。预注册文本在 `docs/protocols/scoring_admissibility.md`。
+
+“把所有前缀都报 aliased”现在得到 `caught=0`、`unsubstantiated=1`、
+`false_positives=3`、`admissible=False`，不再打满共主端点。
+
+## T15 完成块（2026-11-09）—— RouterShim 契约
+
+`src/adapter/router_shim.py` 在 Response 层把探测目标映射成：
+
+- `status=received`
+- `src` = 合成最后一跳路由器
+- `dst` = 被探测地址
+- `icmp_type=1`（Destination Unreachable）
+- 可配置 hop limit
+
+`RouterRule` 用最长前缀匹配；aliased 规则必须只暴露一个来源。`Stage2Truth`
+由同一组规则生成，因此可以把实际出现的 `src` 集合与 `GroundTruth.routers`
+直接比较。`test_router_shim.py` 覆盖逐字段、最长匹配、aliased 单来源、
+范围外无回包、确定性选择和非法规则。
+
+**2026-11-10 扩展：** `RouterRule` 增加 `response_rate`，`RouterShim` 增加会话
+seed；同一个 `(rule, seed, dst)` 仍确定，但不同 seed 可产生不同回包与来源。沉默
+前缀允许没有可达路由器。`src/experiment/stage2.py` 由此生成 32 前缀、71 个真值
+路由器的统一测试床，并使用同一对象同时产生 `Response` 与 `Stage2Truth`。六条非
+Agent 基线的 30-seed 结果、A1/A2 接线与剩余阻塞见
+`docs/results/stage2-2026-11-10.md`。
+
+## T17 完成块（2026-11-09）—— 最小 CI 与 Stage 1 真靶场入口
+
+### CI
+
+新增 `.github/workflows/test.yml`：Python 3.12，拒绝 integration marker，
+运行 `pytest tests -m "not integration"`。本地等价结果为
+**618 passed / 7 skipped**，Linux 容器全量结果为 **625 passed**。工作流 YAML
+已解析通过；由于改动尚未 push，GitHub 远端执行要在下一次 push 后出现。
+
+### Stage 1 真靶场
+
+Compose 新增 `stage1-target` 与 `stage1-harness` profile：
+
+- target 直接挂载 `config/stage1_config.json`；
+- harness 给 `2001:db8:5::/48` 配路由；
+- 同一 harness 跑 B0/B1/B4/M1/M2；
+- 宿主脚本先停 target、再读 `packet_log`，最后清理。
+
+入口：
+
+```bash
+make smoke-table SEEDS=0
+make smoke-table SEEDS=0-29
+```
+
+seed 0 实测五行全部完成，总挂钟 **339.19 s**：
+
+| 策略 | waste | caught | charged |
+|---|---:|---:|---:|
+| B0 | 0.2500 | 0 | 300 |
+| B1 | 0.2133 | 0 | 300 |
+| B4 | 0.4833 | 8 | 300 |
+| M1 | 0.4833 | 8 | 300 |
+| M2 | 0.4833 | 8 | 300 |
+
+靶场正常退出账本：`captured=1500`、`enqueued=1500`、`libnet_errors=0`。
+这只是单 seed 冒烟，不是统计结论；正式 30 seed 表尚未运行。
+
+## T19 完成块（2026-11-09）—— 对等投入协议
+
+`docs/protocols/equal_effort.md` 固定 B5-open 为主比较：B5 与 A2 初始工具池
+相同，B5 可在评测前构造新原语，A2 可在运行中构造；两边共享 `K` 次构造尝试、
+同一验证器、同一预算与信息边界。B5-closed 固定工具池，只作消融。
+
+新增 `config/protocols/primitive_schema.json`，强制新原语只经 `ProbeSurface`，
+不得读取真值、直接开网络或启动进程。T19 的文档测试还检查同预算、同信息、
+同工具池、同裁决人与最小审计包都存在。
+
+## B5 / 6SEVEN 归类完成（2026-11-09）
+
+阅读上游 commit `f22f6670790912e8b5eb8b01c7280988b6a2f4b3` 后定为 **(ii)**：
+6SEVEN online alias detection 是固定六长度 × 三探、每前缀 18 探的检测组件，
+会参与运行期扫描，但不自行跨前缀分配预算。B5 将由“该固定检测组件 + 显式发现
+分配器”组成，两部分从同一预算扣费。证据见
+`docs/protocols/b5_6seven_classification.md`。
+
+## T11 完成块（2026-11-09）—— 配对检验、Holm 与逐 seed 报告
+
+新增 `src/scoring/stats.py` 与 `src/scoring/report.py`，仍保持零第三方运行时
+依赖：
+
+- 非零配对差值不超过 16 时，`paired_wilcoxon()` 枚举全部符号翻转，返回精确
+  双侧 p 值；
+- 更大样本使用平均秩、并列秩修正、连续性修正的正态近似；
+- 报告均值差、中位数差、W+ 统计量与 rank-biserial 效应量；
+- `holm_bonferroni()` 实现 step-down 校正；
+- `summarize_distribution()` 输出均值、中位数、标准差、四分位、极值和
+  bootstrap 均值区间；
+- `to_json()` 保留每一策略的逐 seed 原始值、分布与比较结果。
+
+配对单位严格是同一 `(config, seed)`。缺 seed、重复策略名或两边 seed 集合不同
+时拒绝比较，不会静默取交集。
+
+`test_stats.py` 用一组“两个策略均值 CI 重叠、但逐 seed 差值高度一致”的合成
+数据验证配对设计仍有功效；另覆盖精确 p 值、并列秩、全零差值、Holm 已知例和
+JSON 分布。全量测试为 **634 passed / 7 skipped**。
+
+## T12 完成块（2026-11-09）—— Agent 可观察的在线目标
+
+新增 `src/agent/objective.py`。在线目标只接收 `Response`，不导入真值或评分层。
+
+它按前缀累计：
+
+- 探测数、回包数；
+- 响应来源身份；
+- `(来源, icmp_type, icmp_code, hop_limit)` 响应签名。
+
+当某前缀至少探测 5 次、回包率至少 80%、且来源身份不超过一个时，标记为
+**饱和**。只有未饱和前缀的签名进入在线价值：
+
+```text
+Hill number = exp(ShannonEntropy(signature counts))
+online_info_bits = log2(Hill number)
+```
+
+这使全 aliased/单一来源重复响应降为价值 0；稀疏但有内容的正常前缀至少保留
+一个可信签名；Stage 2 的不同间接来源会增加有效签名数。它不使用到达顺序，
+`observe_many(order)` 与逆序结果相同。
+
+**与 `info_gain` 的关系**：这是方向性代理，不是无偏估计。新可信签名提高代理量，
+重复饱和来源不提高；但真实 `I(Probes; Routers)` 仍需 oracle 才能计算。论文中
+不得把该代理量写成 `info_gain` 的等值测量。
+
+`prompts.render()` 可接收 `objective_text`，把在线目标作为“仅由 Response 推导、
+不是真值”的独立段落提供给 Agent。T12 在 Stage 1 只构建、不参赛。全量测试为
+**644 passed / 7 skipped**。
+
+## T6b 完成块（2026-11-09）—— B2 / B3 / B5
+
+### B2：响应密度贪心
+
+`b2_response_density.py` 先覆盖未探前缀，之后每个 epoch 按当前经验响应率分配，
+不使用 UCB 探索项。它保留了 B4 的 epoch 节奏、预算分摊、三态响应计数和最终声明，
+因此与 B4 的差异集中在“是否探索”而不是另一套记账口径。
+
+### B3：bit-reversal
+
+`b3_bit_reversal.py` 在任务前缀内按 bit-reversal 游标取地址，并在前缀之间轮转。
+它跳过前缀网络地址，使用 `surface.probe()` 精确发送生成地址；测试覆盖位序、
+地址唯一性、前缀归属与预算耗尽。
+
+### B5：6SEVEN + 发现分配器
+
+`b5_frp_aware.py` 按已定案的 (ii) 实现：
+
+- 六种长度默认 `/48 /64 /96 /112 /116 /120`，必须位于任务前缀之下；
+- 每长度三个确定性随机目标，两个回包即声明 aliased；
+- 每前缀完整负判需要六组、18 探；
+- 检测之后，剩余预算交给 bit-reversal 发现分配器；
+- 检测和发现共享同一个权威预算。
+
+对于比 `/48` 更长的任务前缀，只测试可嵌套的长度（例如 `/64` 下为五组）。
+这不改变 6SEVEN 规则，只避免向任务范围外发探针。
+
+`test_b2_b3_b5.py` 共 13 条测试，覆盖算法、预算、确定性、aliased 早停、完整负判
+和检测到发现阶段的预算交接。
+
+## T8 完成块（2026-11-09）—— 31 条路径全部有测试索引
+
+新增 `docs/test_coverage.md`，把设计文档点名的 Code paths 与 Runner flows
+逐项映射到测试函数或测试类。`Oracle.ground_truth` 与 `reset_target` 之前只被
+构造，行为没有直接测试；新增 `tests/unit/test_oracle.py` 覆盖真值返回、seed
+转发、reset 日志与非整数拒绝。
+
+当前覆盖图为 **Code paths 21/21、Runner flows 10/10、GAPS 0**。它不是行覆盖率，
+而是“文档点名的要求有没有至少一个可执行断言”的清单。
+
+## T9 完成块（2026-11-09）—— 推迟项维护
+
+`TODOS.md` 已建立并现场更新：
+
+- 池大小上界从文档常量变为启动期硬拒绝；
+- `jq` 已确认存在；
+- Codex CLI 已由当前桌面环境提供；
+- 导师数据、额外 TGA、mount namespace 与 fork 回退预案仍按原优先级保留。
+
+新增 `tests/unit/test_real_executor.py`，保证 `max_in_flight` 超过标定上界时在
+创建原始套接字之前失败。
+
+## Stage 1 正式 30-seed 结果（2026-11-10）
+
+完整结果冻结在 `docs/results/stage1-2026-11-10.md`。靶场账本为 45,000 sent /
+45,000 captured / 45,000 enqueued / 0 libnet errors，墙钟 3,212.923 秒。
+
+| 策略 | waste mean | waste SD | caught mean |
+|---|---:|---:|---:|
+| B0 | 0.250000 | 0.000000 | 0.0 |
+| B1 | 0.253222 | 0.023853 | 0.0 |
+| B4 | 0.481111 | 0.002947 | 7.9 |
+| M1 | 0.481444 | 0.002580 | 8.0 |
+| M2 | 0.706556 | 0.063737 | 8.0 |
+
+预注册的 M2 vs B4 与 M2 vs M1 都用同 seed 配对 Wilcoxon + Holm：
+
+- M2 的 waste 比 B4 平均高 0.225444，校正后 p = 5.39e-6；
+- M2 的 waste 比 M1 平均高 0.225111，校正后 p = 5.39e-6；
+- caught 没有显著改善；
+- 两个共同主端点判决都是对照胜。
+
+当前结论只针对 Stage 1 封闭动作空间和现有 UCB1 记忆定义：**跨 run 历史没有
+帮助策略绕开已识别陷阱，反而强化了预算向高响应前缀集中。** 这不回答 A1/A2、
+开放动作空间、Stage 2 或真实互联网外部有效性。
