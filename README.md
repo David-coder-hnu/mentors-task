@@ -6,16 +6,41 @@
 
 > ### ⚠️ 当前状态：Stage 1、Stage 2 基线与 T7 兼容轨道均有实测，但**尚未完成 Agent/P1 正式检验**
 >
-> - 20 个实现任务完成 **19** 个（T1–T15、T17–T20）—— 完成的是**靶场适配层、真值层、评分器、决策缓存、执行沙箱、实验编排层、留出集、RouterShim、统计层、在线目标、B0–B5 基线、测试覆盖索引、Stage 1 真靶场冒烟入口、记忆族与 T7 去别名化兼容轨道**。协议已升到 **v4**：Stage 1 五行、Stage 2 六条静态基线、A1/A2 的 runner 侧决策代理与缓存回放都已接线。
+> - 20 个实现任务完成 **19** 个（T1–T15、T17–T20）—— 完成的是**靶场适配层、真值层、评分器、决策缓存、执行沙箱、实验编排层、留出集、RouterShim、统计层、在线目标、B0–B5 基线、测试覆盖索引、Stage 1 真靶场冒烟入口、记忆族与 T7 去别名化兼容轨道**。协议已升到 **v4**：Stage 1 五行、Stage 2 六条静态基线、A1/A2/A3 的 runner 侧决策代理与缓存回放都已接线。
 > - **Stage 1 正式 30-seed 表已完成**：45,000 探、账本 `captured=enqueued=45,000`、零 libnet 错误。M2 相对 B4/M1 的 aliased waste 增加约 22.5 个百分点（Holm 校正后 p≈5.4e-6），caught 没有改善；当前 UCB1 跨 run 记忆设计是负面结果。完整结果见 `docs/results/stage1-2026-11-10.md`。
 > - **Stage 2 RouterShim 六行基线已完成**：180,000 探、30 seeds；B5 平均发现 56.6 个路由器，B2/B4 约 29 个。A1/A2/A3 已接通协议 v4、runner 侧决策缓存、安全复合原语与共用确定性报告；30-seed fixture 预检和 900/900 缓存回放通过。真实模型表仍需轮换凭据与明确成本上限。完整结果见 `docs/results/stage2-2026-11-10.md`。
 > - **T7 已在本机完成**：Linux/arm64 Docker 中原生编译锁定版本的 `aliasv6 + scanv6`；4/4 aliased seed 被拦截，进入 scanner 的 aliased 地址为 0。完整 LSTM 6Sense 仍不冒充已完成，范围见 `docs/results/t7-6sense-compat-2026-11-10.md`。
-> - **A1/A2 是否更好仍是尚未检验的假说。** Stage 1 数据只否定当前 M2 记忆设计，不回答开放动作空间或 LLM Agent。
+> - **A1/A2/A3 是否更好仍是尚未检验的假说。** Stage 1 数据只否定当前 M2 记忆设计，不回答开放动作空间、知识消融或 LLM Agent。
 > - 所有已发表的、写进设计文档的判断，凡涉及"Agent 会赢/不会赢"，都是**设计选择**，不是测量结果。
 
 ---
 
-## 一、问题出在哪
+## 一、目前可以回答什么
+
+项目目前能够支持的结论是：
+
+> **已经有一套可运行、可回放、可证伪的 IPv6 探测评测台；受控实验表明，追高响应率的自适应策略会陷入“响应很多、实体很少”的 aliasing 陷阱，而当前跨运行记忆设计会进一步放大浪费。Agent 是否更好仍未回答。**
+
+| 研究问题 | 当前答案 | 证据边界 |
+|---|---|---|
+| 只用回包数量指导预算会怎样？ | B2/B4 持续投入 aliased 前缀，只发现约 29 个路由器，waste 约 58% / 51% | RouterShim 合成测试床 |
+| FRP-aware 手写策略是否有效？ | B5 在该测试床平均发现 **56.6** 个路由器，waste **20.5%**，显著优于 B2/B4 | 只在该 shim 定义下成立 |
+| 加记忆是否自然改善探测？ | 当前 UCB1 跨 run 记忆是负面结果：M2 的 waste 比 B4/M1 高约 **22.5 个百分点**，caught 没改善 | Stage 1 真 Punching Bag，45,000 探 |
+| “响应多”是否等于“真实实体多”？ | 不等；重复 aliased 来源不会重复计入 `true_routers` | Stage 2 评分定义与结果 |
+| 6Sense 能否拦截已知 aliased 地址？ | 兼容轨道中 4/4 aliased seed 被拦截，进入 scanner 的量为 **0** | `aliasv6 + scanv6`，非完整 LSTM |
+| LLM 或开放动作空间是否更好？ | **未知**；真实 A1/A2/A3 正式表尚未运行 | fixture 只验证工程链路 |
+| 结论能否外推到真实互联网？ | **不能**；Stage 2 与 6Sense 兼容轨道都不提供外部效度 | P4 |
+
+因此可以写“评测台有效、aliasing 陷阱可复现、当前记忆设计失败”；**不能写“Agent 已优于 RL”或“LLM 已学会主动构造探测原语”**。
+
+完整结果入口：
+
+- [Stage 1 正式结果](docs/results/stage1-2026-11-10.md)
+- [Stage 2 RouterShim 结果](docs/results/stage2-2026-11-10.md)
+- [T7 6Sense 兼容轨道](docs/results/t7-6sense-compat-2026-11-10.md)
+- [T16 A1/A2/A3 工程预检](docs/results/t16-engineering-2026-11-10.md)
+
+## 二、问题出在哪
 
 导师给的调研报告里有一句准确的 Gap：
 
@@ -32,7 +57,7 @@
 
 aliasing 是这件事的难点：一个只会数"收到了多少回包"的系统，会把 aliased 前缀当成最大发现。
 
-## 二、四个命题，以及它们各自的状态
+## 三、四个命题，以及它们各自的状态
 
 | | 命题 | 状态 |
 |---|---|---|
@@ -46,7 +71,7 @@ aliasing 是这件事的难点：一个只会数"收到了多少回包"的系统
 1. **靶场 + 可回放评分器**（复用 Punching Bag，不自建）
 2. **Agent 是靶场上的被测对象**，不是贡献本身
 
-## 三、三条决定了仓库长相的核心判断
+## 四、三条决定了仓库长相的核心判断
 
 **① 贡献是靶场与评分器，Agent 是被测对象。** 因为大家缺的不是"再多一个算法"，而是**一个知道正确答案的评测台**——所有人只能报 hit rate / 覆盖数，而 hit rate 在 aliased 前缀面前失效。
 
@@ -54,14 +79,14 @@ aliasing 是这件事的难点：一个只会数"收到了多少回包"的系统
 
 | 阶段 | 靶场 | 覆盖 | 主指标 |
 |---|---|---|---|
-| **Stage 1** | Punching Bag **原样复用** | 响应率 / aliasing 的策略选择 | 泛化后的 `info_gain`（实体 = 非 aliased 的响应前缀集合） |
-| **Stage 2** | 在其上加 **Response 层 shim**（不 fork 包路径） | 外围 / 间接响应 | `info_gain = I(Probes ; Routers)` |
+| **Stage 1** | Punching Bag **原样复用** | 响应率 / aliasing 的策略选择 | `aliased_waste_ratio`、`aliased_caught`；`info_gain` 为诊断量 |
+| **Stage 2** | 在其上加 **Response 层 shim**（不 fork 包路径） | 外围 / 间接响应 | `true_routers`；aliased 端点与路由器熵为诊断量 |
 
 Punching Bag 只回 ICMPv6 Echo Reply——**没有路由器、没有拓扑、没有 hop limit 语义**。所以在 Stage 1 里，策略唯一能决定的是"下一个探哪个前缀"，**这正是 P1 指控 RL 的那种封闭动作空间**。P1 的完整检验只能在 Stage 2 做。于是 Stage 1 不再是"完整交付物"，而是 **Stage 2 的 harness 前置**。
 
 **③ 强制隔离靠进程边界 + 执行沙箱，不靠约定。** 见下面的硬约束。
 
-## 四、仓库结构
+## 五、仓库结构
 
 ```
 IPv6_Agent_探测_设计方案.md   ★ 唯一权威的设计文档（活文档，永远以它为准）
@@ -77,12 +102,12 @@ config/heldout/                 独立前缀空间与响应率分布的留出集
 config/protocols/               对等投入与新原语 schema
 src/
   adapter/                      靶场适配层：ProbeSurface / Oracle 分离，进程边界，执行沙箱
-  baselines/                    基线策略（B0–B5；Stage 1 已交付 B0 / B1 / B4）
-  agent/                        Agent 决策层：状态规范化 + 决策缓存 + LLM 决策体
-  scoring/                      可回放评分器
+  baselines/                    B0–B5、M1/M2 基线与记忆族
+  agent/                        A1/A2/A3、缓存、状态规范化、在线目标与 opaque 编码
+  scoring/                      Stage 1/2 可回放评分、端点、统计与报告
   experiment/                   实验编排层：Stage 1/2 矩阵、决策代理与一键入口
 docker/                         Punching Bag 靶场容器（锁定上游 commit）
-scripts/                        吞吐标定、Stage 2 基线/分析、6Sense 前置检查与 completion 适配器
+scripts/                        吞吐标定、实验分析、6Sense 兼容轨道与 completion 适配器
 tests/unit/                     单测（进 hosted CI）
 tests/integration/              需要 Docker / CAP_NET_RAW 的集成测试（marker 排除）
 docs/                           文档存档，见 docs/README.md
@@ -95,22 +120,27 @@ docs/                           文档存档，见 docs/README.md
 
 **文档从哪读起**：先读 [`docs/README.md`](docs/README.md)，它按权威性给每个文件定位，并说明冲突时以谁为准。一句话规则：`plans/` 与 `artifacts/` 里的任何判断，只要与根目录设计文档不一致，**都是前者过时**——它们是决策的过程记录，不是决策本身。
 
-## 五、怎么跑
+## 六、怎么跑
 
 零运行时依赖，只用 Python 标准库。开发依赖只有 `pytest`。
 
 ```bash
-python -m venv .venv
-.venv/Scripts/python.exe -m pip install pytest      # Windows
-# .venv/bin/python -m pip install pytest            # Linux / macOS
+python3 -m venv .venv
+.venv/bin/python -m pip install pytest
 
-.venv/Scripts/python.exe -m pytest                  # 683 passed, 7 skipped（2026-11-09）
+# Windows 使用：
+# .venv\Scripts\python.exe -m pip install pytest
+# .venv\Scripts\python.exe -m pytest
+
+make test          # 当前宿主：696 passed, 7 skipped
 ```
+
+Linux 容器全量测试包含真实 IPv6 集成测试，当前为 **703 passed**。
 
 跑一次实验（一条命令，零参数即用 `config/stage1_config.json` 跑 B0）：
 
 ```bash
-.venv/Scripts/python.exe -m src.experiment --offline --seeds 0-2
+.venv/bin/python -m src.experiment --offline --seeds 0-2
 ```
 
 重建留出集（固定 seed，产物可直接 diff）：
@@ -123,7 +153,13 @@ python -m venv .venv
 `2001:db8:a5::/48`，aliased 数量与响应率分档都刻意不同于调参集。它用于调参，
 不参与主表；对应断言在 `tests/test_heldout_disjoint.py`。
 
-`--offline` 是**排练靶场**（不出网卡、只按 `aliased` 前缀合成回包），用来验证编排链路本身；**由它得出的数不进入报告**。去掉 `--offline` 走真靶场，但需要 Linux + `CAP_NET_RAW`。**能跑的行**：`B0` / `B1` / `B4` / `M1` / `M2`。M1 每趟冷启动，M2 读取并回写本策略自己的记忆；两行首 epoch 相同。
+`--offline` 是**排练靶场**（不出网卡、只按 `aliased` 前缀合成回包），用来验证编排链路本身；**由它得出的数不进入报告**。去掉 `--offline` 走真靶场，但需要 Linux + `CAP_NET_RAW`。
+
+- Stage 1 真靶场行：`B0` / `B1` / `B4` / `M1` / `M2`；
+- Stage 2 RouterShim 静态行：`B0`–`B5`；
+- Agent 行：`A1` / `A2` / `A3`，需要 runner 侧 completion 或已冻结的决策缓存。
+
+M1 每趟冷启动；M2 读取并回写本策略自己的记忆，两行首 epoch 相同。
 
 本地目标（`make help` 列全部）：
 
@@ -136,11 +172,12 @@ make stage2-baselines        # Stage 2 六行 × 30 seeds（RouterShim，非外�
 make analyze-stage2          # Stage 2 逐 seed 分布与基线配对比较
 make ablation-fixture        # A1/A2/A3 工程预检（fixture，不是模型结果）
 make analyze-ablation        # A1/A2/A3 同 seed 配对与 provenance 标记
+make 6sense-compat           # T7：Linux 容器中的 aliasv6 + scanv6 去别名化验收
 ```
 
 `make smoke-table` 现在会启动 Stage 1 Punching Bag、在容器内跑五行矩阵、**先停靶场再读账本**，最后把结果与账本写进 `docker/run/stage1-smoke-table.json`。正式全表使用 `SEEDS=0-29`。
 
-集成测试需要 Linux + `CAP_NET_RAW` + 一个在跑的靶场，在宿主上直接跑会 **skip**（Windows 建不了 ICMPv6 原始套接字）——这正是设计要的语义：单测进 hosted CI，集成测试用 marker 排除。
+集成测试需要 Linux + `CAP_NET_RAW` + 一个在跑的靶场，在非 Linux 宿主上直接跑会 **skip**——单测进 hosted CI，集成测试用 marker 排除。
 
 ```bash
 # 靶场冒烟（正例 5/5 + 负对照 0/5，退出码 0 即通过）
@@ -149,13 +186,13 @@ docker compose up --build --abort-on-container-exit --exit-code-from prober
 docker compose down
 ```
 
-## 六、两条硬约束（违反则整组实验作废）
+## 七、两条硬约束（违反则整组实验作废）
 
 1. **策略侧只能看到 `ProbeSurface`，不得触及任何真值字段。**
    强制手段是**进程边界**（策略跑在子进程，只经 stdio 拿 `Response`）**加上执行沙箱**（拒绝读 `config/`、拒绝 `subprocess`、拒绝直接网络访问）。**两条都有红灯测试守着，不是约定。**
 2. **探测并发下 `state` 必须规范化**，否则决策缓存永不命中、实验不可复现。
 
-## 七、使用限制与第三方许可 ⚠️
+## 八、使用限制与第三方许可 ⚠️
 
 **本仓库必须保持 private。**
 
@@ -172,7 +209,7 @@ docker compose down
 
 第三方论文 PDF **不进版本库**。引用第三方数据/代码一律用「链接 + commit hash」，不 vendor 原文。
 
-## 八、协作约定
+## 九、协作约定
 
 - **设计文档是唯一权威**。任何判断上的冲突，以它为准；其余文档都是快照。
 - **改代码要同时改文档**：设计文档里的 `` `:NNN` `` 是**它自己的行号**，`src/` 与 `tests/` 里有上百处引用。写回采用**零行号漂移**规矩——正文只做**同行**替换，新增内容整段追加到文末。
