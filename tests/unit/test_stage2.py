@@ -128,6 +128,12 @@ def test_compose_schema_accepts_an_ordered_program() -> None:
     assert action.steps is not None
     assert tuple(step.target for step in action.steps) == ("unprobed", "responsive")
 
+    construct = parse_action(
+        '{"action":"construct","name":"epoch2-balanced",'
+        '"blueprint":"balanced_probe","count":10,"reason":"test"}'
+    )
+    assert construct.name == "epoch2-balanced"
+
 
 def test_response_rate_and_seed_make_router_choice_reproducible() -> None:
     rule = RouterRule(
@@ -256,3 +262,15 @@ def test_a3_uses_opaque_regions_and_has_no_ipv6_text_in_prompt() -> None:
         "2001:db8:5::/64": False,
         "2001:db8:5:1::/64": False,
     }
+
+
+def test_a3_accepts_a_step_only_program_as_explicit_compatibility_shape() -> None:
+    surface = _AgentSurface(
+        [
+            '{"target":"balanced","fraction":0.1}',
+            '{"target":"least_probed","fraction":1.0}',
+        ]
+    )
+    run_a3(surface)
+    assert surface.budget_left == 0
+    assert len(surface.tool_pools) == 2

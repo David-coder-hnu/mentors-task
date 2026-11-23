@@ -28,18 +28,20 @@
 
 ### 完成 A1/A2/A3 的 Stage 2 正式表
 
-**What:** 跑完 A1/A2/A3 的预注册场景，产出可回放决策缓存，并完成 A1/A2/A3
+**What:** 跑完 A1/A2/A3 的剩余三个预注册场景，产出可回放决策缓存，并完成 A1/A2/A3
 同 seed 配对与 B5-open 对等比较；在此之前不得把 T16 标为完成。
 
 **Why:** 协议 v4 已把模型调用与缓存移到 runner 侧；A3 轨道、三行共用确定性报告、
 运行期 `compose` 程序、B5-open、四场景 30-seed fixture、功效敏感度与构造审计包
 都已通过，原先 A2 最终声明的 provider 超时已从设计上消除。剩余问题不是执行链路：
-旧 provider 凭据应轮换，正式矩阵需要模型调用，而当前 `api_cost_cap=0`；
-B5-open 还需在独立留出拓扑上冻结程序，并由非场景作者裁决构造物。
+provider 凭据已轮换，`broad` 的 30-seed 真实矩阵和 B5 同场景对照已完成；
+`prefix_diversity`、`sparse_trap`、`hot_hierarchy` 仍需模型调用。A3 本轮有
+step-only 输出兼容偏差，确认性知识消融应在固定输出 schema 后复跑。B5-open
+已在独立留出拓扑上冻结程序，但构造物仍需非场景作者裁决，真实网络稳健性也尚未验证。
 
 **Context:** 证据见 `docs/results/t16-engineering-2026-11-10.md`。模型调用入口是
 `scripts/responses_completion.py`；缓存与 agent 结果都在 `docker/run/`，不进
-版本库。正式开跑需要新凭据、明确成本上限和冻结模型身份。
+版本库。现有真实运行没有保留 token usage，后续正式表需要费用账本。
 
 **Effort:** M
 **Priority:** P1

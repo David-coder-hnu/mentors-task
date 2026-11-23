@@ -143,8 +143,13 @@ class OpaqueEncoding:
             name = payload.get("name")
             blueprint = payload.get("blueprint")
             count = payload.get("count")
-            if not isinstance(name, str) or not name:
-                raise AblationError("construct name 必须是非空字符串")
+            if (
+                not isinstance(name, str)
+                or not name
+                or not name.replace("_", "").replace("-", "").isalnum()
+                or not name[0].isalpha()
+            ):
+                raise AblationError("construct name 必须是合法标识符")
             if blueprint != "balanced_probe":
                 raise AblationError("construct blueprint 必须是 balanced_probe")
             if not isinstance(count, int) or isinstance(count, bool) or count <= 0:
@@ -159,8 +164,13 @@ class OpaqueEncoding:
         if kind == "compose":
             name = payload.get("name")
             count = payload.get("count")
-            if not isinstance(name, str) or not name:
-                raise AblationError("compose name 必须是非空字符串")
+            if (
+                not isinstance(name, str)
+                or not name
+                or not name.replace("_", "").replace("-", "").isalnum()
+                or not name[0].isalpha()
+            ):
+                raise AblationError("compose name 必须是合法标识符")
             if not isinstance(count, int) or isinstance(count, bool) or count <= 0:
                 raise AblationError("compose count 必须是正整数")
             try:

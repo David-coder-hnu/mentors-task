@@ -279,7 +279,7 @@ def parse_action(text: str, *, origin: str = "模型输出") -> Action:
         if (
             not isinstance(name, str)
             or not name
-            or not name.replace("_", "").isalnum()
+            or not name.replace("_", "").replace("-", "").isalnum()
             or not name[0].isalpha()
         ):
             raise bad(f"`name` 必须是字母开头的标识符，得到 {name!r}")
@@ -304,7 +304,7 @@ def parse_action(text: str, *, origin: str = "模型输出") -> Action:
         if (
             not isinstance(name, str)
             or not name
-            or not name.replace("_", "").isalnum()
+            or not name.replace("_", "").replace("-", "").isalnum()
             or not name[0].isalpha()
         ):
             raise bad(f"`name` 必须是字母开头的标识符，得到 {name!r}")

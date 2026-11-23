@@ -1,0 +1,61 @@
+{
+  "candidate": "balanced",
+  "program": [
+    {
+      "target": "balanced",
+      "fraction": 1.0
+    }
+  ],
+  "tuning_config": "config/p1/b5_open_tuning.json",
+  "tuning_config_sha256": "6a3b07c29a1b46a2ec6ea02daf6298512163ebf0a2f7fdc2e83c7b3849120356",
+  "tuning_seeds": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9
+  ],
+  "candidates": {
+    "balanced": {
+      "mean_true_routers": 52.4,
+      "mean_aliased_waste_ratio": 0.1487,
+      "mean_aliased_caught": 6.0
+    },
+    "least_probed": {
+      "mean_true_routers": 41.1,
+      "mean_aliased_waste_ratio": 0.3771,
+      "mean_aliased_caught": 6.0
+    },
+    "unprobed": {
+      "mean_true_routers": 41.1,
+      "mean_aliased_waste_ratio": 0.3771,
+      "mean_aliased_caught": 6.0
+    },
+    "responsive": {
+      "mean_true_routers": 36.1,
+      "mean_aliased_waste_ratio": 0.5387000000000001,
+      "mean_aliased_caught": 6.0
+    },
+    "least_then_unprobed": {
+      "mean_true_routers": 41.1,
+      "mean_aliased_waste_ratio": 0.3771,
+      "mean_aliased_caught": 6.0
+    },
+    "least_then_responsive": {
+      "mean_true_routers": 41.1,
+      "mean_aliased_waste_ratio": 0.4423,
+      "mean_aliased_caught": 6.0
+    },
+    "unprobed_then_responsive": {
+      "mean_true_routers": 41.0,
+      "mean_aliased_waste_ratio": 0.4585,
+      "mean_aliased_caught": 6.0
+    }
+  },
+  "selection_rule": "max mean true_routers; tie -> min aliased waste; tie -> name"
+}

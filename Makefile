@@ -28,9 +28,16 @@ endif
 
 #: 冒烟表的 seed 范围。默认 3 个够验证链路；正式那一轮是 0-29（30 个配对单位）。
 SEEDS ?= 0-2
+P1_ANALYSIS_SOURCE ?= docker/run/p1-fixture/manifest-results.json
+P1_AUDIT_SOURCE ?= docker/run/p1-fixture/manifest-results.json
+P1_LIVE_AGENT_OUT ?= docker/run/p1-live-broad.json
+P1_LIVE_B5_OUT ?= docker/run/p1-live-broad-b5.json
+P1_LIVE_CACHE ?= docker/run/p1-live-broad-cache.jsonl
+P1_LIVE_EVIDENCE ?= docker/run/p1-live-broad-evidence.json
+P1_LIVE_AUDIT ?= docker/run/p1-live-broad-evidence-audit
 
 .DEFAULT_GOAL := help
-.PHONY: help test test-unit smoke-offline heldout harness range-smoke range-down sweep smoke-table analyze-stage1 stage2-baselines analyze-stage2 ablation-fixture analyze-ablation p1-fixture analyze-p1 p1-power p1-audit 6sense-compat
+.PHONY: help test test-unit smoke-offline heldout harness range-smoke range-down sweep smoke-table analyze-stage1 stage2-baselines analyze-stage2 ablation-fixture analyze-ablation p1-fixture analyze-p1 p1-power p1-audit p1-live-replay p1-live-b5 p1-evidence tune-b5-open 6sense-compat
 
 # ── 帮助 ─────────────────────────────────────────────────────────────────────
 
@@ -51,14 +58,20 @@ help:
 	@echo "  make analyze-stage2   对最近一次 Stage 2 基线做分布与配对比较"
 	@echo "  make ablation-fixture A1/A2/A3 × 30 seeds 的确定性工程预检（不是模型结果）"
 	@echo "  make analyze-ablation 对最近一次 A1/A2/A3 矩阵做同 seed 配对分析"
-	@echo "  make p1-fixture       在 3 个预注册场景运行 A1/A2/A3/B5-open/B5-closed 工程预检"
+	@echo "  make p1-fixture       在 4 个预注册场景运行 A1/A2/A3/B5-open/B5-closed 工程预检"
 	@echo "  make analyze-p1       填充 P1 的 2×2 工程矩阵"
 	@echo "  make p1-power         检查 P1 的预注册功效敏感度"
 	@echo "  make p1-audit         生成 P1 构造、API 与 epoch 审计包"
+	@echo "  make p1-live-replay   无模型调用地重放已有 900 次真实模型决策"
+	@echo "  make p1-live-b5       在 broad 场景运行冻结 B5 两条确定性基线"
+	@echo "  make p1-evidence      组装真实模型与 B5 的同场景证据，并做分析与审计"
+	@echo "  make tune-b5-open     在独立 held-out 拓扑上选择并冻结 B5-open 程序"
 	@echo "  make 6sense-compat    T7：Linux/arm64 容器中的 aliasv6 + scanv6 去别名化验收"
 	@echo ""
 	@echo "  PY=$(PY)"
 	@echo "  SEEDS=$(SEEDS)   （smoke-offline / smoke-table 都可用 SEEDS=0-29）"
+	@echo "  P1_ANALYSIS_SOURCE=$(P1_ANALYSIS_SOURCE)"
+	@echo "  P1_AUDIT_SOURCE=$(P1_AUDIT_SOURCE)"
 
 # ── 宿主侧就能跑的（与 CI 同一条） ───────────────────────────────────────────
 
@@ -139,13 +152,39 @@ p1-fixture:
 	$(PY) scripts/run_p1_fixture.py
 
 analyze-p1:
-	$(PY) scripts/analyze_p1.py docker/run/p1-fixture/manifest-results.json
+	$(PY) scripts/analyze_p1.py $(P1_ANALYSIS_SOURCE)
 
 p1-power:
 	$(PY) scripts/check_p1_power.py
 
 p1-audit:
-	$(PY) scripts/make_p1_audit.py docker/run/p1-fixture/manifest-results.json
+	$(PY) scripts/make_p1_audit.py $(P1_AUDIT_SOURCE)
+
+p1-live-replay:
+	$(PY) -m src.experiment --stage 2 --config config/stage2_config.json --seeds 0-29 \
+		--strategy src.agent.strategies:run_a1 \
+		--strategy src.agent.strategies:run_a2 \
+		--strategy src.agent.strategies:run_a3 \
+		--decision-cache $(P1_LIVE_CACHE) \
+		--out docker/run/p1-live-broad-replay.json
+
+p1-live-b5:
+	$(PY) -m src.experiment --stage 2 --config config/stage2_config.json --seeds 0-29 \
+		--strategy src.baselines.b5_frp_aware:run \
+		--strategy src.baselines.b5_open:run \
+		--out $(P1_LIVE_B5_OUT)
+
+p1-evidence:
+	$(PY) scripts/assemble_p1_results.py --scenario broad \
+		--provenance completion-command \
+		--source $(P1_LIVE_AGENT_OUT) \
+		--source $(P1_LIVE_B5_OUT) \
+		--out $(P1_LIVE_EVIDENCE)
+	$(PY) scripts/analyze_p1.py $(P1_LIVE_EVIDENCE)
+	$(PY) scripts/make_p1_audit.py $(P1_LIVE_EVIDENCE) --out $(P1_LIVE_AUDIT)
+
+tune-b5-open:
+	$(PY) scripts/tune_b5_open.py
 
 6sense-compat:
 	bash scripts/run_6sense_compat.sh

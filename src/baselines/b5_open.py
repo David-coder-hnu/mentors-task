@@ -14,10 +14,28 @@ from ..agent.primitive import ProgramStep, compose_counts
 from .b4_response_bandit import Answered
 from .b5_frp_aware import AliasVerdict, detect_prefix
 
-B5_OPEN_PROGRAM: tuple[ProgramStep, ...] = (
-    ProgramStep("least_probed", 0.6),
-    ProgramStep("responsive", 0.4),
-)
+B5_OPEN_PROGRAMS: dict[str, tuple[ProgramStep, ...]] = {
+    "balanced": (ProgramStep("balanced", 1.0),),
+    "least_probed": (ProgramStep("least_probed", 1.0),),
+    "unprobed": (ProgramStep("unprobed", 1.0),),
+    "responsive": (ProgramStep("responsive", 1.0),),
+    "least_then_unprobed": (
+        ProgramStep("least_probed", 0.6),
+        ProgramStep("unprobed", 0.4),
+    ),
+    "least_then_responsive": (
+        ProgramStep("least_probed", 0.6),
+        ProgramStep("responsive", 0.4),
+    ),
+    "unprobed_then_responsive": (
+        ProgramStep("unprobed", 0.5),
+        ProgramStep("responsive", 0.5),
+    ),
+}
+
+#: Frozen before evaluation after tuning on the independent held-out topology.
+FROZEN_CANDIDATE = "balanced"
+B5_OPEN_PROGRAM = B5_OPEN_PROGRAMS[FROZEN_CANDIDATE]
 
 
 class _Surface(Protocol):
@@ -32,7 +50,7 @@ class _Surface(Protocol):
     def rng(self) -> random.Random: ...
 
 
-def run(surface: _Surface) -> None:
+def run_program(surface: _Surface, program: tuple[ProgramStep, ...]) -> None:
     budget = surface.budget_left
     if budget is None:
         raise ValueError("surface.budget_left 是 None")
@@ -61,7 +79,7 @@ def run(surface: _Surface) -> None:
             prefixes=prefixes,
             pulls=pulls,
             replies=replies,
-            steps=B5_OPEN_PROGRAM,
+            steps=program,
             count=remaining,
         )
         for prefix, count in zip(prefixes, counts, strict=True):
@@ -76,4 +94,14 @@ def run(surface: _Surface) -> None:
             surface.report(verdict.prefix, verdict.aliased)
 
 
-__all__ = ["B5_OPEN_PROGRAM", "run"]
+def run(surface: _Surface) -> None:
+    run_program(surface, B5_OPEN_PROGRAM)
+
+
+__all__ = [
+    "B5_OPEN_PROGRAM",
+    "B5_OPEN_PROGRAMS",
+    "FROZEN_CANDIDATE",
+    "run",
+    "run_program",
+]

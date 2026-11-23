@@ -293,6 +293,13 @@ def run_matrix(
             )
             rows.append(row)
             memory_by_strategy[strategy] = row.session.memory
+            sys.stderr.write(
+                f"[matrix] {strategy} seed={seed} "
+                f"routers={row.session.stage2.true_routers if row.session.stage2 else '-'} "
+                f"waste={row.score.aliased_waste_ratio:.4f} "
+                f"cached={row.session.decision_cache_hits}/{row.session.decision_calls}\n"
+            )
+            sys.stderr.flush()
     return MatrixResult(rows=tuple(rows), elapsed_s=time.perf_counter() - started)
 
 

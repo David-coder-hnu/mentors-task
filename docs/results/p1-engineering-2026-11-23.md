@@ -2,8 +2,9 @@
 
 日期：2026-11-23
 
-状态：**A2 运行期程序构造、B5-open、四场景矩阵、功效敏感度和审计包均已完成；
-真实模型结果仍未运行**
+状态：**工程闭环已完成；broad 场景已有真实模型结果，其余三个预注册场景仍待运行。
+真实结果与证据边界见
+[`p1-real-broad-2026-11-23.md`](p1-real-broad-2026-11-23.md)**
 
 ## 1. 本轮新增
 
@@ -34,6 +35,14 @@ A2/A3 新增 `compose` 动作。模型提交的是一段有序程序，例如：
 - 检测阶段与 B5-closed 完全相同；
 - 发现阶段执行一个在评测前冻结的手写 DSL 程序；
 - 与 A2 使用相同 step 语义和预算账本。
+
+程序选择只使用独立 held-out 拓扑 `config/heldout/stage1_heldout.json`：
+
+- 7 个预注册候选；
+- 10 个 tuning seeds；
+- 选择规则为最大化 `true_routers`，再用 waste 和名称打破平局；
+- 最终冻结 `balanced`：平均 52.4 个路由器、waste 14.87%；
+- 冻结记录见 `config/p1/b5_open_frozen.json`。
 
 ### 四个预注册场景
 
@@ -77,7 +86,7 @@ aliased_waste_ratio: power=0.8880 PASS
 fixture 的统计结果全部标记为 `fixture-only`，只用于工程验证：
 
 - 四个场景都出现 `A2 beats A1`；
-- B5-open 的手写程序没有胜过 B5-closed；
+- B5-open 的冻结程序通常与 B5-closed 接近，但没有显著胜过；
 - A2 与 B5-open 的相对结果随场景变化；
 - A3 与 A2 的决策轨迹一致，验证 opaque 编解码不改变动作执行。
 
@@ -98,9 +107,8 @@ fixture 的统计结果全部标记为 `fixture-only`，只用于工程验证：
 
 ## 5. 仍缺什么
 
-- 轮换后的真实模型 provider；
-- `api_cost_cap` 与冻结模型身份；
-- B5-open 在独立留出拓扑上的程序调参与冻结审计；
+- 其余三个预注册场景的真实模型矩阵；
+- token、费用与人工工时账本；
 - 非场景作者的独立裁决；
 - ReplayNet/真实网络稳健性验证。
 
@@ -108,6 +116,7 @@ fixture 的统计结果全部标记为 `fixture-only`，只用于工程验证：
 
 ```bash
 make p1-power
+make tune-b5-open
 make p1-fixture
 make analyze-p1
 make p1-audit

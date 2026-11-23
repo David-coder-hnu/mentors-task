@@ -5,10 +5,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from src.baselines.b5_open import B5_OPEN_PROGRAM, FROZEN_CANDIDATE
 from src.experiment.stage2 import load_stage2_context
 
 ROOT = Path(__file__).resolve().parents[2]
 MANIFEST = ROOT / "config" / "p1" / "manifest.json"
+FROZEN = ROOT / "config" / "p1" / "b5_open_frozen.json"
 
 
 def test_all_preregistered_p1_scenarios_load() -> None:
@@ -32,3 +34,13 @@ def test_primary_comparisons_are_pre_registered() -> None:
         "A2_vs_B5_open",
         "B5_open_vs_B5_closed",
     }
+
+
+def test_b5_open_code_matches_the_heldout_freeze_record() -> None:
+    frozen = json.loads(FROZEN.read_text(encoding="utf-8"))
+    assert frozen["candidate"] == FROZEN_CANDIDATE
+    assert frozen["program"] == [
+        {"target": step.target, "fraction": step.fraction}
+        for step in B5_OPEN_PROGRAM
+    ]
+    assert frozen["tuning_config"].endswith("b5_open_tuning.json")

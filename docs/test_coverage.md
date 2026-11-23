@@ -2,7 +2,7 @@
 
 这份索引把设计文档点名的路径映射到至少一个可执行测试，不是行覆盖率报告。
 
-## Code paths（27/27）
+## Code paths（30/30）
 
 | 路径 | 测试 |
 |---|---|
@@ -33,6 +33,9 @@
 | A1/A2/A3 共用报告与配对分析 | `test_stage2.py`、`test_ablation_analysis.py` |
 | A2/A3/B5-open 运行期组合程序 | `test_primitive.py`、`test_stage2.py` |
 | P1 四场景与 2×2 分析 | `test_p1_scenarios.py`、`test_p1_analysis.py` |
+| B5-open held-out 冻结一致性 | `test_p1_scenarios.py::test_b5_open_code_matches_the_heldout_freeze_record` |
+| P1 多来源证据、直接输出审计与 step-only 兼容 | `test_p1_evidence.py` |
+| completion token 账本不记录 prompt 或凭据 | `test_responses_completion.py` |
 
 ## Runner flows（11/11）
 

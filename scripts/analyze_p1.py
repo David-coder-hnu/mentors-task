@@ -1,4 +1,9 @@
-"""P1 2x2-style analysis from preregistered scenario matrices."""
+"""P1 2x2-style analysis from preregistered scenario matrices.
+
+A scenario can be assembled from more than one runner output. The live broad
+evidence uses that facility: the agent rows come from one real-model matrix and
+the deterministic B5 rows come from a second matrix with the same seeds.
+"""
 
 from __future__ import annotations
 
@@ -42,10 +47,15 @@ def _series(rows: list[Mapping[str, object]], endpoint: str) -> dict[str, dict[i
     return out
 
 
-def analyze_scenario(document: Mapping[str, object]) -> dict[str, object]:
+def _rows(document: Mapping[str, object]) -> list[Mapping[str, object]]:
     rows = document.get("rows")
     if not isinstance(rows, list):
         raise ValueError("scenario 输入没有 rows")
+    return rows
+
+
+def analyze_scenario(document: Mapping[str, object]) -> dict[str, object]:
+    rows = _rows(document)
     endpoints = {}
     for endpoint in ("true_routers", "aliased_waste_ratio", "aliased_caught"):
         series = _series(rows, endpoint)
@@ -93,6 +103,16 @@ def markdown(report: Mapping[str, object]) -> str:
                 "",
             ]
         )
+    scenarios = report["scenarios"]
+    assert isinstance(scenarios, Mapping)
+    if report["provenance"] == "completion-command" and len(scenarios) < 4:
+        lines.extend(
+            [
+                "> **正式 P1 矩阵尚未完成。** 当前只是已运行场景的 scenario-level "
+                "结果；不能据此宣布四场景总体 P1 结论。",
+                "",
+            ]
+        )
     for scenario_id, result in report["scenarios"].items():
         lines.extend(
             [
@@ -121,14 +141,23 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("manifest_results", type=Path)
     args = parser.parse_args(argv)
     source = json.loads(args.manifest_results.read_text(encoding="utf-8"))
-    scenarios = {}
+    grouped: dict[str, list[dict[str, object]]] = {}
     provenance = source.get("provenance")
     for item in source["results"]:
-        document = json.loads(Path(item["output"]).read_text(encoding="utf-8"))
+        output = Path(item["output"])
+        document = json.loads(output.read_text(encoding="utf-8"))
         provenance = provenance or document.get("agent_provenance")
-        result = analyze_scenario(document)
+        grouped.setdefault(str(item["id"]), []).extend(_rows(document))
+    scenarios = {}
+    for scenario_id, rows in grouped.items():
+        result = analyze_scenario(
+            {
+                "rows": rows,
+                "agent_provenance": provenance,
+            }
+        )
         result["provenance"] = provenance
-        scenarios[str(item["id"])] = result
+        scenarios[scenario_id] = result
     report = {"provenance": provenance, "scenarios": scenarios}
     out = args.manifest_results.with_name("p1-analysis.json")
     out.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

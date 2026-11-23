@@ -4,14 +4,14 @@
 
 导师课题的研究仓库。仓库里同时放着**调研/设计文档**与**在可控靶场上跑对比实验的原型代码**。
 
-> ### ⚠️ 当前状态：Stage 1、Stage 2 基线与 T7 兼容轨道均有实测，但**尚未完成 Agent/P1 正式检验**
+> ### ⚠️ 当前状态：Stage 1、Stage 2 基线与 T7 兼容轨道均有实测；P1 已完成一个真实模型场景，但**尚未完成四场景正式检验**
 >
 > - 20 个实现任务完成 **19** 个（T1–T15、T17–T20）—— 完成的是**靶场适配层、真值层、评分器、决策缓存、执行沙箱、实验编排层、留出集、RouterShim、统计层、在线目标、B0–B5 基线、测试覆盖索引、Stage 1 真靶场冒烟入口、记忆族与 T7 去别名化兼容轨道**。协议已升到 **v4**：Stage 1 五行、Stage 2 六条静态基线、A1/A2/A3 的 runner 侧决策代理与缓存回放都已接线。
 > - **Stage 1 正式 30-seed 表已完成**：45,000 探、账本 `captured=enqueued=45,000`、零 libnet 错误。M2 相对 B4/M1 的 aliased waste 增加约 22.5 个百分点（Holm 校正后 p≈5.4e-6），caught 没有改善；当前 UCB1 跨 run 记忆设计是负面结果。完整结果见 `docs/results/stage1-2026-11-10.md`。
-> - **Stage 2 RouterShim 六行基线已完成**：180,000 探、30 seeds；B5 平均发现 56.6 个路由器，B2/B4 约 29 个。A1/A2/A3 已接通协议 v4、runner 侧决策缓存、安全复合原语与共用确定性报告；30-seed fixture 预检和 900/900 缓存回放通过。真实模型表仍需轮换凭据与明确成本上限。完整结果见 `docs/results/stage2-2026-11-10.md`。
+> - **Stage 2 RouterShim 六行基线已完成**：180,000 探、30 seeds；B5 平均发现 56.6 个路由器，B2/B4 约 29 个。A1/A2/A3 已接通协议 v4、runner 侧决策缓存、安全复合原语与共用确定性报告；30-seed fixture 预检和 900/900 缓存回放通过。完整基线结果见 `docs/results/stage2-2026-11-10.md`。
 > - **T7 已在本机完成**：Linux/arm64 Docker 中原生编译锁定版本的 `aliasv6 + scanv6`；4/4 aliased seed 被拦截，进入 scanner 的 aliased 地址为 0。完整 LSTM 6Sense 仍不冒充已完成，范围见 `docs/results/t7-6sense-compat-2026-11-10.md`。
-> - **P1 工程闭环已补齐**：A2/A3 现在能在运行期组合新的安全探测程序；B5-open 已用同 DSL 实现；四个预注册场景、N=30 功效敏感度、600 次 fixture 运行和完整审计包已跑通。真实模型表仍未运行。结果见 `docs/results/p1-engineering-2026-11-23.md`。
-> - **A1/A2/A3 是否更好仍是尚未检验的假说。** Stage 1 数据只否定当前 M2 记忆设计，不回答开放动作空间、知识消融或 LLM Agent。
+> - **P1 的 `broad` 场景已有真实模型结果**：A1/A2/A3 × 30 seeds 共 900 次决策，实际模型调用 577 次、缓存命中 323 次，900/900 缓存重放一致。A2 平均发现 28.7 个路由器，显著优于 A1 的 11.3；但冻结的人工 B5-open 平均 55.8，显著优于 A2。当前结果支持“开放动作空间有效”，不支持“Agent 比同能力的人工组合更有优势”。另外三个预注册场景、独立裁决和真实互联网验证仍缺。见 `docs/results/p1-real-broad-2026-11-23.md`。
+> - **P1 总体仍是未完成的假说。** 一个 `RouterShim` 场景不能回答四场景总体、真实网络外部效度或完整知识消融。
 > - 所有已发表的、写进设计文档的判断，凡涉及"Agent 会赢/不会赢"，都是**设计选择**，不是测量结果。
 
 ---
@@ -20,7 +20,7 @@
 
 项目目前能够支持的结论是：
 
-> **已经有一套可运行、可回放、可证伪的 IPv6 探测评测台；受控实验表明，追高响应率的自适应策略会陷入“响应很多、实体很少”的 aliasing 陷阱，而当前跨运行记忆设计会进一步放大浪费。Agent 是否更好仍未回答。**
+> **已经有一套可运行、可回放、可证伪的 IPv6 探测评测台；受控实验表明，追高响应率的自适应策略会陷入“响应很多、实体很少”的 aliasing 陷阱，而当前跨运行记忆设计会进一步放大浪费。开放动作空间在模拟测试床上有效，但不能由此声称 Agent 优于同能力的人工组合。**
 
 | 研究问题 | 当前答案 | 证据边界 |
 |---|---|---|
@@ -29,7 +29,8 @@
 | 加记忆是否自然改善探测？ | 当前 UCB1 跨 run 记忆是负面结果：M2 的 waste 比 B4/M1 高约 **22.5 个百分点**，caught 没改善 | Stage 1 真 Punching Bag，45,000 探 |
 | “响应多”是否等于“真实实体多”？ | 不等；重复 aliased 来源不会重复计入 `true_routers` | Stage 2 评分定义与结果 |
 | 6Sense 能否拦截已知 aliased 地址？ | 兼容轨道中 4/4 aliased seed 被拦截，进入 scanner 的量为 **0** | `aliasv6 + scanv6`，非完整 LSTM |
-| LLM 或开放动作空间是否更好？ | **未知**；真实 A1/A2/A3 正式表尚未运行 | fixture 只验证工程链路 |
+| 开放动作空间是否更好？ | 在 `broad` RouterShim 场景中有效：A2 平均 28.7 个路由器，A1 为 11.3 | 仅一个预注册场景；其余三个未跑 |
+| LLM Agent 是否优于同能力人工程序？ | **当前不支持**：冻结 B5-open 平均 55.8，显著高于 A2 | 同一 `broad` 场景；仍需独立裁决 |
 | 结论能否外推到真实互联网？ | **不能**；Stage 2 与 6Sense 兼容轨道都不提供外部效度 | P4 |
 
 因此可以写“评测台有效、aliasing 陷阱可复现、当前记忆设计失败”；**不能写“Agent 已优于 RL”或“LLM 已学会主动构造探测原语”**。
@@ -40,6 +41,7 @@
 - [Stage 2 RouterShim 结果](docs/results/stage2-2026-11-10.md)
 - [T7 6Sense 兼容轨道](docs/results/t7-6sense-compat-2026-11-10.md)
 - [T16 A1/A2/A3 工程预检](docs/results/t16-engineering-2026-11-10.md)
+- [P1 broad 真实模型结果](docs/results/p1-real-broad-2026-11-23.md)
 - [P1 开放动作空间工程闭环](docs/results/p1-engineering-2026-11-23.md)
 
 ## 二、问题出在哪
@@ -134,10 +136,10 @@ python3 -m venv .venv
 # .venv\Scripts\python.exe -m pip install pytest
 # .venv\Scripts\python.exe -m pytest
 
-make test          # 当前宿主：715 passed, 7 skipped
+make test          # 当前宿主：721 passed, 7 skipped
 ```
 
-Linux 容器全量测试包含真实 IPv6 集成测试，当前为 **722 passed**。
+Linux 容器全量测试包含真实 IPv6 集成测试，当前为 **728 passed**。
 
 跑一次实验（一条命令，零参数即用 `config/stage1_config.json` 跑 B0）：
 
@@ -175,9 +177,13 @@ make analyze-stage2          # Stage 2 逐 seed 分布与基线配对比较
 make ablation-fixture        # A1/A2/A3 工程预检（fixture，不是模型结果）
 make analyze-ablation        # A1/A2/A3 同 seed 配对与 provenance 标记
 make p1-power                # P1 预注册功效敏感度
+make tune-b5-open            # 在独立 held-out 拓扑上冻结 B5-open 程序
 make p1-fixture              # 四场景 A1/A2/A3/B5-open/B5-closed 工程矩阵
 make analyze-p1              # P1 开放动作空间矩阵分析
 make p1-audit                # 构造、API 与 epoch 观测审计包
+make p1-live-replay          # 无模型调用地重放已有 broad 真实决策
+make p1-live-b5              # 在 broad 运行冻结 B5 两条确定性基线
+make p1-evidence             # 组装 broad 主比较并重做分析/审计
 make 6sense-compat           # T7：Linux 容器中的 aliasv6 + scanv6 去别名化验收
 ```
 

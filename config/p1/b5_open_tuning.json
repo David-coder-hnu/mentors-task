@@ -1,0 +1,19 @@
+{
+  "_comment": [
+    "B5-open program selection uses only the independent held-out topology.",
+    "This config must never be used for the evaluation table."
+  ],
+  "base_config": "../heldout/stage1_heldout.json",
+  "tuning_seeds": "0-9",
+  "W_s": 0.25,
+  "budget": 1000,
+  "epoch_size": 100,
+  "api_cost_cap": 0,
+  "wall_clock_cap_s": 1800,
+  "model": "no-llm",
+  "model_version": "no-llm",
+  "temperature": 0.0,
+  "top_p": 1.0,
+  "max_tokens": 1,
+  "call_date": "2026-11-23"
+}

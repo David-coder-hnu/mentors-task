@@ -106,11 +106,16 @@ manifest：`config/p1/manifest.json`。
 
 ## 当前状态
 
-工程 runner、compose DSL、B5-open 和 4 场景 fixture 已实现并跑通。
+工程 runner、compose DSL、B5-open、4 场景 fixture 已实现并跑通。
+B5-open 已在独立 held-out 拓扑上用 7 个候选 × 10 seeds 完成选择，冻结为
+`balanced`，记录在 `config/p1/b5_open_frozen.json`。
+`broad` 场景已完成 A1/A2/A3 × 30 seeds 的真实模型矩阵，并补齐 B5-closed /
+B5-open 同场景对照；结果见 `docs/results/p1-real-broad-2026-11-23.md`。
 fixture 结果只用于验证执行与统计链路，不进入判决。
 
 正式运行仍缺：
 
-- 冻结模型身份与费用上限；
-- B5-open 在留出拓扑上的参数/程序冻结记录；
+- `prefix_diversity`、`sparse_trap`、`hot_hierarchy` 三个真实模型场景；
+- A3 固定输出 schema 后的确认性复跑；
+- token/费用账本与人工工时记录；
 - 非场景作者对 A2/B5-open 构造物的独立裁决。

@@ -20,6 +20,7 @@ from .ablation import OpaqueEncoding
 from .decide import Action, Stage1State, Tool, ToolPool, parse_action
 from .objective import OnlineObjective
 from .primitive import compose_counts
+from .primitive import parse_steps
 from .prompts import render
 from .reporting import declarations
 
@@ -152,6 +153,34 @@ def _execute_compose(
     return state, objective
 
 
+def _parse_ablated_action(
+    raw: str,
+    *,
+    encoding: OpaqueEncoding,
+    expected_count: int,
+) -> Action:
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        payload = None
+    if not isinstance(payload, dict):
+        raise ValueError(f"A3 决策不是 JSON 对象：{raw!r}")
+
+    # Provider compatibility: a single program step is a complete one-step
+    # compose program even when the outer action envelope is omitted.
+    if set(payload) == {"target", "fraction"}:
+        return Action(
+            kind="compose",
+            reason="A3 provider returned a step-only program",
+            count=expected_count,
+            name="opaque_single_step",
+            # A one-step program necessarily spends the whole epoch, so a
+            # provider-supplied partial fraction is normalized to 1.0.
+            steps=parse_steps([{"target": payload["target"], "fraction": 1.0}]),
+        )
+    return encoding.translate_action_payload(payload)
+
+
 def _run(
     surface: AgentSurface,
     *,
@@ -196,13 +225,11 @@ def _run(
         if encoding is None:
             action = parse_action(raw, origin="runner 决策代理")
         else:
-            try:
-                payload = json.loads(raw)
-            except json.JSONDecodeError:
-                payload = None
-            if not isinstance(payload, dict):
-                raise ValueError(f"A3 决策不是 JSON 对象：{raw!r}")
-            action = encoding.translate_action_payload(payload)
+            action = _parse_ablated_action(
+                raw,
+                encoding=encoding,
+                expected_count=min(surface.epoch_size, state.remaining_budget),
+            )
         state = state.next_epoch()
 
         if action.kind in {"stop", "report", "final_report"}:
