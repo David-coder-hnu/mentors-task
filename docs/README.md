@@ -49,9 +49,10 @@
 | 文件 | 说明 |
 |---|---|
 | `stage1-2026-11-10.md` | Stage 1 正式 30-seed 真靶场结果、配对检验与解释边界 |
-| `stage2-2026-11-10.md` | Stage 2 RouterShim 六行 × 30 seeds 基线、A1/A2 接线状态与未完成边界 |
+| `stage2-2026-11-10.md` | Stage 2 RouterShim 六行 × 30 seeds 基线、A1/A2/A3 接线状态与未完成边界 |
 | `t7-6sense-compat-2026-11-10.md` | 本机 arm64 兼容的 6Sense `aliasv6 + scanv6` 去别名化验收 |
 | `t16-engineering-2026-11-10.md` | A1/A2/A3 同 seed 配对工程闭环、30-seed fixture 预检与正式开跑条件 |
+| `p1-engineering-2026-11-23.md` | A2 运行期组合程序、B5-open、四场景和 P1 审计包 |
 
 结果文件只陈述对应 config、seed 和靶场下实际测到的内容，不把 Stage 1 结果外推到
 P1、Stage 2 或真实互联网。
@@ -66,6 +67,7 @@ P1、Stage 2 或真实互联网。
 | `scoring_admissibility.md` | aliased 声明的证据门槛与精度门槛 |
 | `b5_6seven_classification.md` | 6SEVEN online alias detection 的源码归类与 B5 构造方式 |
 | `ablation.md` | A3 不透明同构编码、配置审计与当前阻塞边界 |
+| `p1_preregistration.md` | P1 开放程序 DSL、四场景、A2/B5-open 比较与 2×2 判决 |
 
 它们低于根设计文档，但高于 `plans/` 与 `artifacts/` 中的过程记录。正式实验若违反
 这里的预注册规则，必须在结果中显式标记为偏离，不能静默修改门槛。

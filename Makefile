@@ -30,7 +30,7 @@ endif
 SEEDS ?= 0-2
 
 .DEFAULT_GOAL := help
-.PHONY: help test test-unit smoke-offline heldout harness range-smoke range-down sweep smoke-table analyze-stage1 stage2-baselines analyze-stage2 ablation-fixture analyze-ablation 6sense-compat
+.PHONY: help test test-unit smoke-offline heldout harness range-smoke range-down sweep smoke-table analyze-stage1 stage2-baselines analyze-stage2 ablation-fixture analyze-ablation p1-fixture analyze-p1 p1-power p1-audit 6sense-compat
 
 # ── 帮助 ─────────────────────────────────────────────────────────────────────
 
@@ -51,6 +51,10 @@ help:
 	@echo "  make analyze-stage2   对最近一次 Stage 2 基线做分布与配对比较"
 	@echo "  make ablation-fixture A1/A2/A3 × 30 seeds 的确定性工程预检（不是模型结果）"
 	@echo "  make analyze-ablation 对最近一次 A1/A2/A3 矩阵做同 seed 配对分析"
+	@echo "  make p1-fixture       在 3 个预注册场景运行 A1/A2/A3/B5-open/B5-closed 工程预检"
+	@echo "  make analyze-p1       填充 P1 的 2×2 工程矩阵"
+	@echo "  make p1-power         检查 P1 的预注册功效敏感度"
+	@echo "  make p1-audit         生成 P1 构造、API 与 epoch 审计包"
 	@echo "  make 6sense-compat    T7：Linux/arm64 容器中的 aliasv6 + scanv6 去别名化验收"
 	@echo ""
 	@echo "  PY=$(PY)"
@@ -130,6 +134,18 @@ ablation-fixture:
 
 analyze-ablation:
 	$(PY) scripts/analyze_ablation.py docker/run/stage2-a123-fixture.json
+
+p1-fixture:
+	$(PY) scripts/run_p1_fixture.py
+
+analyze-p1:
+	$(PY) scripts/analyze_p1.py docker/run/p1-fixture/manifest-results.json
+
+p1-power:
+	$(PY) scripts/check_p1_power.py
+
+p1-audit:
+	$(PY) scripts/make_p1_audit.py docker/run/p1-fixture/manifest-results.json
 
 6sense-compat:
 	bash scripts/run_6sense_compat.sh

@@ -87,7 +87,7 @@ SMOKE_TABLE_ROWS: tuple[str, ...] = (
     "src.baselines.m2_memory_warm:run",
 )
 
-#: Stage 2 的静态基线；A1/A2 另列，因为它们需要 runner 侧决策代理。
+#: Stage 2 的静态基线；A1/A2/A3 另列，因为它们需要 runner 侧决策代理。
 STAGE2_BASELINE_ROWS: tuple[str, ...] = (
     "src.baselines.b0_probe_all:run",
     "src.baselines.b1_uniform_random:run",
@@ -100,6 +100,14 @@ STAGE2_AGENT_ROWS: tuple[str, ...] = (
     "src.agent.strategies:run_a1",
     "src.agent.strategies:run_a2",
     "src.agent.strategies:run_a3",
+)
+P1_B5_OPEN_ROW = "src.baselines.b5_open:run"
+P1_COMPARISON_ROWS: tuple[str, ...] = (
+    "src.agent.strategies:run_a1",
+    "src.agent.strategies:run_a2",
+    "src.agent.strategies:run_a3",
+    "src.baselines.b5_frp_aware:run",
+    P1_B5_OPEN_ROW,
 )
 
 #: 今天真正跑得起来的那一行。默认值取它而不是整个 `SMOKE_TABLE_ROWS`，
@@ -426,12 +434,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--decision-cache",
         type=Path,
         default=None,
-        help="A1/A2 决策缓存 JSONL；未命中时按 completion 配置决定是否联网",
+        help="A1/A2/A3 决策缓存 JSONL；未命中时按 completion 配置决定是否联网",
     )
     parser.add_argument(
         "--completion-command",
         default=None,
-        help="A1/A2 的本地 completion 命令；prompt 走 stdin，原始动作走 stdout",
+        help="A1/A2/A3 的本地 completion 命令；prompt 走 stdin，原始动作走 stdout",
     )
     parser.add_argument(
         "--completion-timeout",
@@ -459,7 +467,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     cache: DecisionCache | None = None
     if agent_rows:
         if args.stage != 2:
-            raise ValueError("A1/A2 只在 Stage 2 参赛；加 --stage 2")
+            raise ValueError("A1/A2/A3 只在 Stage 2 参赛；加 --stage 2")
         context = load_stage2_context(args.config)
         cache = (
             DecisionCache.load(args.decision_cache)
@@ -566,6 +574,8 @@ __all__ = [
     "SMOKE_TABLE_ROWS",
     "STAGE2_AGENT_ROWS",
     "STAGE2_BASELINE_ROWS",
+    "P1_B5_OPEN_ROW",
+    "P1_COMPARISON_ROWS",
     "ExperimentSpec",
     "MatrixResult",
     "RowResult",

@@ -1,0 +1,47 @@
+{
+  "_comment": [
+    "P1 open-action-space preregistration. All scenarios reuse the same safe ",
+    "RouterShim truth generator and the same model/report protocol. The fixture ",
+    "runner is engineering validation; only completion-command provenance is model evidence."
+  ],
+  "primary_endpoint": "true_routers",
+  "secondary_endpoint": "aliased_waste_ratio",
+  "power_config": "config/p1/power.json",
+  "program_schema": "config/protocols/program_schema.json",
+  "seeds": "0-29",
+  "comparisons": [
+    ["A2_vs_A1", "src.agent.strategies:run_a2", "src.agent.strategies:run_a1"],
+    ["A2_vs_B5_open", "src.agent.strategies:run_a2", "src.baselines.b5_open:run"],
+    ["B5_open_vs_B5_closed", "src.baselines.b5_open:run", "src.baselines.b5_frp_aware:run"]
+  ],
+  "scenarios": [
+    {
+      "id": "broad",
+      "config": "config/stage2_config.json",
+      "budget": 1000,
+      "epoch_size": 100,
+      "hypothesis": "Fixed A1 needs many epochs to cover a broad task; composed A2 can diversify within each epoch."
+    },
+    {
+      "id": "prefix_diversity",
+      "config": "config/p1/prefix_diversity.json",
+      "budget": 1000,
+      "epoch_size": 100,
+      "hypothesis": "Aliased prefixes coexist with sparse real regions; per-epoch cross-prefix composition should matter."
+    },
+    {
+      "id": "sparse_trap",
+      "config": "config/p1/sparse_trap.json",
+      "budget": 600,
+      "epoch_size": 100,
+      "hypothesis": "A tight budget makes spending on saturated regions especially damaging."
+    },
+    {
+      "id": "hot_hierarchy",
+      "config": "config/p1/hot_hierarchy.json",
+      "budget": 800,
+      "epoch_size": 100,
+      "hypothesis": "Some responsive regions contain real diversity while saturated regions carry one source."
+    }
+  ]
+}

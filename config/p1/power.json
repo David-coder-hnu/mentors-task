@@ -1,0 +1,24 @@
+{
+  "_comment": [
+    "Pre-registered power sensitivity for P1. MDE is the minimum meaningful ",
+    "paired improvement. The variance values are conservative ceilings: if a ",
+    "model pilot observes larger paired-difference SD, N must be recomputed before the full run."
+  ],
+  "n": 30,
+  "alpha": 0.05,
+  "target_power": 0.8,
+  "simulations": 4000,
+  "seed": 20261123,
+  "endpoints": {
+    "true_routers": {
+      "mde": 5.0,
+      "paired_sd_ceiling": 8.0,
+      "rationale": "5 routers is about 9% of the broad-scenario B5 mean; SD 8 is above observed baseline SD."
+    },
+    "aliased_waste_ratio": {
+      "mde": 0.05,
+      "paired_sd_ceiling": 0.08,
+      "rationale": "5 percentage points is larger than the Stage 1 aliased-waste SD and above a 1% accounting floor."
+    }
+  }
+}

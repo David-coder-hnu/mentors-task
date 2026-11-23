@@ -81,13 +81,33 @@ def load_stage2_context(config_path: Path) -> Stage2Context:
     raw_subnets = base_doc.get("subnets")
     if not isinstance(raw_subnets, list) or not raw_subnets:
         raise ValueError("Stage 1 base config 没有 subnets")
+    raw_include = stage2_doc.get("include_prefixes")
+    if raw_include is None:
+        included: set[str] | None = None
+    else:
+        if not isinstance(raw_include, list) or not raw_include:
+            raise ValueError("include_prefixes 必须是非空数组")
+        included = {
+            str(ipaddress.ip_network(value, strict=False)) for value in raw_include
+        }
 
     rules: list[RouterRule] = []
     slot = 0
-    for index, entry in enumerate(raw_subnets):
+    selected = []
+    for entry in raw_subnets:
         if not isinstance(entry, dict) or "ipv6_prefix" not in entry:
-            raise ValueError(f"subnets[{index}] 不是带 ipv6_prefix 的对象")
+            raise ValueError("subnet 不是带 ipv6_prefix 的对象")
         prefix = str(ipaddress.ip_network(entry["ipv6_prefix"], strict=False))
+        if included is None or prefix in included:
+            selected.append((prefix, entry))
+    if included is not None:
+        missing = included - {prefix for prefix, _entry in selected}
+        if missing:
+            raise ValueError(f"include_prefixes 中有未知前缀：{sorted(missing)}")
+    if not selected:
+        raise ValueError("include_prefixes 过滤后没有前缀")
+
+    for index, (prefix, entry) in enumerate(selected):
         aliased = bool(base_truth.prefixes[prefix]["aliased"])
         rates = (
             float(entry.get("default_response_rate", 0.0)),
@@ -120,7 +140,7 @@ def load_stage2_context(config_path: Path) -> Stage2Context:
     shim = RouterShim(rules)
     prefixed_truth = shim.ground_truth()
     expected_aliased = {
-        prefix: fields["aliased"] for prefix, fields in base_truth.prefixes.items()
+        prefix: base_truth.prefixes[prefix]["aliased"] for prefix in prefixed_truth.prefixes
     }
     observed_aliased = {
         prefix: fields["aliased"] for prefix, fields in prefixed_truth.prefixes.items()

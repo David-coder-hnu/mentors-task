@@ -9,6 +9,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PROTOCOL = REPO_ROOT / "docs" / "protocols" / "equal_effort.md"
 SCHEMA = REPO_ROOT / "config" / "protocols" / "primitive_schema.json"
+PROGRAM_SCHEMA = REPO_ROOT / "config" / "protocols" / "program_schema.json"
 
 
 class TestEqualEffortProtocol:
@@ -43,3 +44,14 @@ class TestEqualEffortProtocol:
         assert safety["properties"]["may_read_ground_truth"]["const"] is False
         assert safety["properties"]["may_open_network"]["const"] is False
         assert safety["properties"]["may_start_process"]["const"] is False
+
+    def test_program_schema_is_bounded_and_target_closed(self) -> None:
+        schema = json.loads(PROGRAM_SCHEMA.read_text(encoding="utf-8"))
+        steps = schema["properties"]["steps"]
+        assert steps["maxItems"] == 4
+        assert set(steps["items"]["properties"]["target"]["enum"]) == {
+            "balanced",
+            "least_probed",
+            "unprobed",
+            "responsive",
+        }

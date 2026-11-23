@@ -233,7 +233,7 @@ class SurfaceServer:
         if request.verb == "decide":
             if self.decision_provider is None:
                 raise ValueError(
-                    "这次会话没有配置 runner 侧决策代理；A1/A2 不能直接访问缓存或网络"
+                    "这次会话没有配置 runner 侧决策代理；A1/A2/A3 不能直接访问缓存或网络"
                 )
             prompt = args["prompt"]
             state = args["state"]
@@ -271,6 +271,8 @@ class SurfaceServer:
                     "cache_hit": bool(decision.cache_hit),
                     "elapsed_s": elapsed,
                     "raw": decision.raw,
+                    "state": dict(state),
+                    "tool_pool": dict(tool_pool),
                 }
             )
             return {

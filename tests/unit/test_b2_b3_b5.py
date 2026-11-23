@@ -8,7 +8,7 @@ import random
 import pytest
 
 from src.adapter.types import Response
-from src.baselines import b2_response_density, b3_bit_reversal, b5_frp_aware
+from src.baselines import b2_response_density, b3_bit_reversal, b5_frp_aware, b5_open
 from src.baselines.b5_frp_aware import AliasVerdict
 
 P48 = "2001:db8:a000::/48"
@@ -167,3 +167,10 @@ class TestB5:
         assert surface.budget_left == 0
         assert len(surface.probes) == 100
         assert surface.reports == [(P48, True)]
+
+    def test_open_uses_same_detection_but_frozen_program_for_discovery(self) -> None:
+        surface = FakeSurface([P48, P49], 120, alias_prefixes={P48})
+        b5_open.run(surface)
+        assert surface.budget_left == 0
+        assert surface.samples
+        assert dict(surface.reports) == {P48: True, P49: False}

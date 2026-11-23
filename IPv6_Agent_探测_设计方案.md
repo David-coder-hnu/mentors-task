@@ -1521,7 +1521,7 @@ class Oracle:                # runner 侧持有，策略进程拿不到（进程
   - Files: `src/agent/ablation.py`, `src/agent/prompts/ablated/`
   - Verify: 消融 prompt 里不含任何 IPv6 术语；A3 与 A1/A2 的同 seed 配对比较
   - **⚠️ v5：本任务当前 BLOCKED，不得开工（OV-10 / C12 #16）。** 上面那条 Verify 是**失效的验收标准**——「prompt 里不含 IPv6 术语」测的是措辞，不是知识（知识在预训练权重里）。**解除条件**：P1 段的重设计要求落地（能单独动领域知识、其余逐字段不变且可断言）。**解锁时点**：Stage 1 冒烟表首组数据之后。**解除后须同步确认族规模**（30 或回到 28）。
-  - **2026-11-10：A1/A2/A3 工程闭环完成，真实模型表仍待外部输入。** `OpaqueEncoding` 已接入 `run_a3`；A3 与 A2 使用相同开放工具池，但前缀/状态/动作只暴露 opaque token。最终声明改由三行共用的确定性规则生成，消除了旧版 A2 第二次模型调用的 300 秒阻塞。3 行 × 30 seeds × 1,000 探 fixture 矩阵跑完，900 次决策缓存回放 900/900 命中，A3 与 A2 在相同 seed 上逐项一致。真实模型表需要轮换后的 provider 凭据、明确 `api_cost_cap` 与冻结模型身份；fixture 不得作为 P1 或知识消融结论。证据见 `docs/results/t16-engineering-2026-11-10.md`。
+  - **2026-11-23：P1 工程链路进一步闭合，真实模型表仍待外部输入。** `OpaqueEncoding` 已接入 `run_a3`；A2/A3 可在运行期用安全 DSL 组合新探测程序；B5-open 已用同一 DSL 实现；四个预注册场景、N=30 功效敏感度、600 次 fixture 运行、3060 次决策和 2040 条构造审计已跑通。最终声明仍由三行共用的确定性规则生成。真实模型表需要轮换后的 provider 凭据、明确 `api_cost_cap` 与冻结模型身份；B5-open 还需独立留出调参与人工裁决。fixture 不得作为 P1 或知识消融结论。证据见 `docs/results/t16-engineering-2026-11-10.md` 与 `docs/results/p1-engineering-2026-11-23.md`。
 
 ### v6 新增任务（T17–T19）
 

@@ -61,6 +61,7 @@ from typing import Any, Literal
 from ..adapter.types import Response
 from . import prompts
 from .cache import CacheKey, DecisionCache
+from .primitive import ProgramStep, parse_steps
 
 #: LLM 调用的注入口：**渲染后的 prompt 文本进，模型的原始输出文本出**。
 #:
@@ -185,7 +186,9 @@ class ToolPool:
 
 # ── 动作 schema ───────────────────────────────────────────────────────────
 
-ActionKind = Literal["probe", "report", "final_report", "construct", "stop"]
+ActionKind = Literal[
+    "probe", "report", "final_report", "construct", "compose", "stop"
+]
 
 #: 每种动作**恰好**允许的键。多一个拒绝、少一个拒绝——**没有第三个选项**。
 _ACTION_FIELDS: Mapping[str, frozenset[str]] = MappingProxyType(
@@ -196,6 +199,7 @@ _ACTION_FIELDS: Mapping[str, frozenset[str]] = MappingProxyType(
         "construct": frozenset(
             {"action", "name", "blueprint", "count", "reason"}
         ),
+        "compose": frozenset({"action", "name", "steps", "count", "reason"}),
         "stop": frozenset({"action", "reason"}),
     }
 )
@@ -215,6 +219,7 @@ class Action:
     name: str | None = None
     blueprint: str | None = None
     reports: Mapping[str, bool] | None = None
+    steps: tuple[ProgramStep, ...] | None = None
 
 
 def parse_action(text: str, *, origin: str = "模型输出") -> Action:
@@ -291,6 +296,30 @@ def parse_action(text: str, *, origin: str = "模型输出") -> Action:
             count=count,
             name=name,
             blueprint=blueprint,
+        )
+
+    if kind == "compose":
+        name = payload["name"]
+        count = payload["count"]
+        if (
+            not isinstance(name, str)
+            or not name
+            or not name.replace("_", "").isalnum()
+            or not name[0].isalpha()
+        ):
+            raise bad(f"`name` 必须是字母开头的标识符，得到 {name!r}")
+        if not isinstance(count, int) or isinstance(count, bool) or count <= 0:
+            raise bad(f"`count` 必须是正整数，得到 {count!r}")
+        try:
+            steps = parse_steps(payload["steps"])
+        except Exception as exc:
+            raise bad(str(exc)) from exc
+        return Action(
+            kind="compose",
+            reason=reason,
+            count=count,
+            name=name,
+            steps=steps,
         )
 
     if kind == "final_report":

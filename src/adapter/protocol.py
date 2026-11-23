@@ -52,7 +52,7 @@ from .types import Response
 #: 客户端多一个 `remember` 动词。M1/M2 的首 epoch、记忆更新与跨 run 回写都依赖
 #: 这三项，缺任一项都不能静默降级成“无记忆”。
 #:
-#: **v4（2026-11-10）**：A1/A2 的 `decide` 动词。缓存与模型调用留在 runner，
+#: **v4（2026-11-10）**：A1/A2/A3 的 `decide` 动词。缓存与模型调用留在 runner，
 #: 策略进程只收到模型原文；这不改变第 ① 条边的真值白名单。
 PROTOCOL_VERSION = 4
 

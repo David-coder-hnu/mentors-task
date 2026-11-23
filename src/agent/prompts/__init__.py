@@ -107,6 +107,11 @@ def render(
             '  {"action": "construct", "name": "<标识符>", "blueprint": "balanced_probe", '
             '"count": <正整数>, "reason": "<一句话>"}'
         )
+        actions.append(
+            '  {"action": "compose", "name": "<标识符>", "steps": '
+            '[{"target": "least_probed|unprobed|responsive|balanced", '
+            '"fraction": <0..1>}], "count": <正整数>, "reason": "<一句话>"}'
+        )
     rules = (
         "- `aliased` 必须是 JSON 的 true / false，**不是** 1 / 0。\n"
         "- 剩余预算大于 0 时只做探测/构造，`count` 必须恰好等于当前 epoch 的预算。\n"

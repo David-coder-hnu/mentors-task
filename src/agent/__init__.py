@@ -74,6 +74,14 @@ from .decide import (
 )
 from .prompts import DECIDER_TEMPLATE, render
 from .objective import ObjectiveError, ObjectiveSnapshot, OnlineObjective
+from .primitive import (
+    MAX_PROGRAM_STEPS,
+    PROGRAM_TARGETS,
+    PrimitiveError,
+    ProgramStep,
+    compose_counts,
+    parse_steps,
+)
 from .strategies import run_a1, run_a2, run_a3
 
 __all__ = [
@@ -82,6 +90,7 @@ __all__ = [
     "KEY_COMPONENTS",
     "KEY_SCHEME",
     "LLM_IDENTITY_KEYS",
+    "MAX_PROGRAM_STEPS",
     "Action",
     "ActionKind",
     "AblatedResponse",
@@ -101,15 +110,20 @@ __all__ = [
     "ObjectiveSnapshot",
     "OpaqueEncoding",
     "OnlineObjective",
+    "PROGRAM_TARGETS",
+    "PrimitiveError",
+    "ProgramStep",
     "Stage1State",
     "Tool",
     "ToolPool",
     "cache_fingerprint",
     "canonical",
+    "compose_counts",
     "decide",
     "digest",
     "digest_of",
     "parse_action",
+    "parse_steps",
     "render",
     "require_llm_identity",
     "same_experiment_fields",

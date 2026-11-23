@@ -26,7 +26,18 @@ def main() -> int:
     if remaining < 0:
         raise SystemExit("预算不合法")
 
-    if "balanced_probe" in prompt:
+    if "compose" in prompt:
+        action = {
+            "action": "compose",
+            "name": "fixture_mix",
+            "steps": [
+                {"target": "unprobed", "fraction": 0.5},
+                {"target": "responsive", "fraction": 0.5},
+            ],
+            "count": epoch_budget,
+            "reason": "确定性接线测试：组合未探与响应率步骤",
+        }
+    elif "balanced_probe" in prompt:
         action = {
             "action": "construct",
             "name": "balanced_probe_smoke",

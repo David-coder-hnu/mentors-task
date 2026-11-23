@@ -43,6 +43,12 @@ def render_ablated(
             '"blueprint": "balanced_probe", "count": <positive integer>, '
             '"reason": "<short reason>"}'
         )
+        actions.append(
+            '  {"action": "compose", "name": "<identifier>", "steps": '
+            '[{"target": "least_probed|unprobed|responsive|balanced", '
+            '"fraction": <0..1>}], "count": <positive integer>, '
+            '"reason": "<short reason>"}'
+        )
     return ABLATED_DECIDER_TEMPLATE.format(
         tools=rendered_tools or "(empty)",
         state=state_text,

@@ -2,7 +2,7 @@
 
 这份索引把设计文档点名的路径映射到至少一个可执行测试，不是行覆盖率报告。
 
-## Code paths（25/25）
+## Code paths（27/27）
 
 | 路径 | 测试 |
 |---|---|
@@ -31,6 +31,8 @@
 | Stage 2 路由器评分 | `test_stage2.py::test_stage2_score_counts_entities_not_responses` |
 | T7 6Sense 去别名化兼容轨道 | `test_6sense_manifest.py`、`test_6sense_compat.py` |
 | A1/A2/A3 共用报告与配对分析 | `test_stage2.py`、`test_ablation_analysis.py` |
+| A2/A3/B5-open 运行期组合程序 | `test_primitive.py`、`test_stage2.py` |
+| P1 四场景与 2×2 分析 | `test_p1_scenarios.py`、`test_p1_analysis.py` |
 
 ## Runner flows（11/11）
 

@@ -42,6 +42,7 @@ class AliasVerdict:
     probes: int
     completed_lengths: tuple[int, ...]
     tested_targets: tuple[str, ...]
+    replies: int = 0
 
 
 def effective_lengths(prefix: str) -> tuple[int, ...]:
@@ -80,6 +81,7 @@ def targets_for_length(
 
 def detect_prefix(surface: _Surface, prefix: str, rng: random.Random) -> AliasVerdict:
     probes = 0
+    replies_total = 0
     completed: list[int] = []
     tested: list[str] = []
     for length in effective_lengths(prefix):
@@ -87,17 +89,24 @@ def detect_prefix(surface: _Surface, prefix: str, rng: random.Random) -> AliasVe
         if left is None:
             raise ValueError("surface.budget_left 是 None")
         if left < PROBES_PER_LENGTH:
-            return AliasVerdict(prefix, None, probes, tuple(completed), tuple(tested))
+            return AliasVerdict(
+                prefix, None, probes, tuple(completed), tuple(tested), replies_total
+            )
         replies = 0
         for target in targets_for_length(prefix, length, rng):
             tested.append(target)
             response = surface.probe(target, "icmp6-echo")
             probes += 1
             replies += int(response.status == "received")
+        replies_total += replies
         completed.append(length)
         if replies >= REPLIES_TO_DECLARE:
-            return AliasVerdict(prefix, True, probes, tuple(completed), tuple(tested))
-    return AliasVerdict(prefix, False, probes, tuple(completed), tuple(tested))
+            return AliasVerdict(
+                prefix, True, probes, tuple(completed), tuple(tested), replies_total
+            )
+    return AliasVerdict(
+        prefix, False, probes, tuple(completed), tuple(tested), replies_total
+    )
 
 
 def _discover(

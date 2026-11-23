@@ -19,6 +19,7 @@ from ..adapter.types import Response
 from .ablation import OpaqueEncoding
 from .decide import Action, Stage1State, Tool, ToolPool, parse_action
 from .objective import OnlineObjective
+from .primitive import compose_counts
 from .prompts import render
 from .reporting import declarations
 
@@ -51,11 +52,22 @@ CONSTRUCT_TOOL = Tool(
     "把 count 次探测优先分给累计探测数最少的 regions。",
 )
 
+COMPOSE_TOOL = Tool(
+    "compose",
+    "在运行时组合新的探测程序。steps 按顺序使用 balanced / least_probed / "
+    "unprobed / responsive 目标，fraction 之和必须为 1。",
+)
+
 ABLATED_TOOLS = (
     Tool("sample", "Observe count items in one region."),
     Tool(
         "construct",
         "Create and immediately execute a balanced allocation across regions.",
+    ),
+    Tool(
+        "compose",
+        "Compose an ordered program from balanced, least-probed, unprobed, "
+        "and responsive allocation steps.",
     ),
 )
 
@@ -95,6 +107,39 @@ def _execute_construct(
         )
     counts = _balanced_counts(state.probes, state.prefixes, action.count)
     for prefix, count in zip(state.prefixes, counts):
+        if count == 0:
+            continue
+        responses = surface.sample(prefix, count)
+        if len(responses) != count:
+            raise ValueError(f"{prefix} 要 {count} 个响应，回来 {len(responses)} 个")
+        state = state.observe(responses)
+        objective = objective.observe_many(responses)
+        if surface.budget_left is not None:
+            state = state.with_budget_left(surface.budget_left)
+    return state, objective
+
+
+def _execute_compose(
+    surface: AgentSurface,
+    state: Stage1State,
+    objective: OnlineObjective,
+    action: Action,
+) -> tuple[Stage1State, OnlineObjective]:
+    if action.count is None or action.steps is None:
+        raise ValueError("compose 缺少 count 或 steps")
+    expected = min(surface.epoch_size, state.remaining_budget)
+    if action.count != expected:
+        raise ValueError(
+            f"本 epoch 必须恰好花 {expected} 次，constructed program 给了 {action.count} 次"
+        )
+    counts = compose_counts(
+        prefixes=state.prefixes,
+        pulls=state.probes,
+        replies=state.replies,
+        steps=action.steps,
+        count=action.count,
+    )
+    for prefix, count in zip(state.prefixes, counts, strict=True):
         if count == 0:
             continue
         responses = surface.sample(prefix, count)
@@ -191,12 +236,16 @@ def _run(
                     f"本 epoch 必须恰好花 {expected} 次，模型给了 {action.count} 次"
                 )
             state, objective = _execute_construct(surface, state, objective, action)
+        elif action.kind == "compose":
+            if not allow_construct:
+                raise ValueError("A1 的封闭工具池不允许 compose")
+            state, objective = _execute_compose(surface, state, objective, action)
         else:  # pragma: no cover - Literal 已封口
             raise ValueError(f"未知动作 {action.kind}")
 
     if state.remaining_budget != 0:
         raise ValueError(
-            f"A1/A2 结束时还剩 {state.remaining_budget} 次预算；"
+            f"A1/A2/A3 结束时还剩 {state.remaining_budget} 次预算；"
             "运行不完整，不能进入主表"
         )
 
@@ -215,7 +264,11 @@ def run_a1(surface: AgentSurface) -> None:
 
 
 def run_a2(surface: AgentSurface) -> None:
-    _run(surface, tools=(*INITIAL_TOOLS, CONSTRUCT_TOOL), allow_construct=True)
+    _run(
+        surface,
+        tools=(*INITIAL_TOOLS, CONSTRUCT_TOOL, COMPOSE_TOOL),
+        allow_construct=True,
+    )
 
 
 def run_a3(surface: AgentSurface) -> None:
@@ -230,6 +283,7 @@ def run_a3(surface: AgentSurface) -> None:
 
 __all__ = [
     "ABLATED_TOOLS",
+    "COMPOSE_TOOL",
     "CONSTRUCT_TOOL",
     "INITIAL_TOOLS",
     "run_a1",

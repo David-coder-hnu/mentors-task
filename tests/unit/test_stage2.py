@@ -117,6 +117,18 @@ def test_construct_schema_is_closed_and_blueprint_whitelisted() -> None:
         )
 
 
+def test_compose_schema_accepts_an_ordered_program() -> None:
+    action = parse_action(
+        '{"action":"compose","name":"mixed","steps":['
+        '{"target":"unprobed","fraction":0.5},'
+        '{"target":"responsive","fraction":0.5}],'
+        '"count":10,"reason":"test"}'
+    )
+    assert action.kind == "compose"
+    assert action.steps is not None
+    assert tuple(step.target for step in action.steps) == ("unprobed", "responsive")
+
+
 def test_response_rate_and_seed_make_router_choice_reproducible() -> None:
     rule = RouterRule(
         "2001:db8:5::/64",
@@ -192,6 +204,23 @@ def test_a2_can_construct_the_balanced_primitive() -> None:
         "2001:db8:5::/64": False,
         "2001:db8:5:1::/64": False,
     }
+
+
+def test_a2_can_compose_a_new_program_at_runtime() -> None:
+    surface = _AgentSurface(
+        [
+            '{"action":"compose","name":"mix","steps":['
+            '{"target":"unprobed","fraction":0.5},'
+            '{"target":"responsive","fraction":0.5}],'
+            '"count":2,"reason":"a"}',
+            '{"action":"compose","name":"mix2","steps":['
+            '{"target":"least_probed","fraction":1.0}],'
+            '"count":2,"reason":"b"}',
+        ]
+    )
+    run_a2(surface)
+    assert surface.budget_left == 0
+    assert "compose" in surface.tool_pools[0]
 
 
 def test_a3_uses_opaque_regions_and_has_no_ipv6_text_in_prompt() -> None:

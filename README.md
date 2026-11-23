@@ -10,6 +10,7 @@
 > - **Stage 1 正式 30-seed 表已完成**：45,000 探、账本 `captured=enqueued=45,000`、零 libnet 错误。M2 相对 B4/M1 的 aliased waste 增加约 22.5 个百分点（Holm 校正后 p≈5.4e-6），caught 没有改善；当前 UCB1 跨 run 记忆设计是负面结果。完整结果见 `docs/results/stage1-2026-11-10.md`。
 > - **Stage 2 RouterShim 六行基线已完成**：180,000 探、30 seeds；B5 平均发现 56.6 个路由器，B2/B4 约 29 个。A1/A2/A3 已接通协议 v4、runner 侧决策缓存、安全复合原语与共用确定性报告；30-seed fixture 预检和 900/900 缓存回放通过。真实模型表仍需轮换凭据与明确成本上限。完整结果见 `docs/results/stage2-2026-11-10.md`。
 > - **T7 已在本机完成**：Linux/arm64 Docker 中原生编译锁定版本的 `aliasv6 + scanv6`；4/4 aliased seed 被拦截，进入 scanner 的 aliased 地址为 0。完整 LSTM 6Sense 仍不冒充已完成，范围见 `docs/results/t7-6sense-compat-2026-11-10.md`。
+> - **P1 工程闭环已补齐**：A2/A3 现在能在运行期组合新的安全探测程序；B5-open 已用同 DSL 实现；四个预注册场景、N=30 功效敏感度、600 次 fixture 运行和完整审计包已跑通。真实模型表仍未运行。结果见 `docs/results/p1-engineering-2026-11-23.md`。
 > - **A1/A2/A3 是否更好仍是尚未检验的假说。** Stage 1 数据只否定当前 M2 记忆设计，不回答开放动作空间、知识消融或 LLM Agent。
 > - 所有已发表的、写进设计文档的判断，凡涉及"Agent 会赢/不会赢"，都是**设计选择**，不是测量结果。
 
@@ -39,6 +40,7 @@
 - [Stage 2 RouterShim 结果](docs/results/stage2-2026-11-10.md)
 - [T7 6Sense 兼容轨道](docs/results/t7-6sense-compat-2026-11-10.md)
 - [T16 A1/A2/A3 工程预检](docs/results/t16-engineering-2026-11-10.md)
+- [P1 开放动作空间工程闭环](docs/results/p1-engineering-2026-11-23.md)
 
 ## 二、问题出在哪
 
@@ -132,10 +134,10 @@ python3 -m venv .venv
 # .venv\Scripts\python.exe -m pip install pytest
 # .venv\Scripts\python.exe -m pytest
 
-make test          # 当前宿主：696 passed, 7 skipped
+make test          # 当前宿主：715 passed, 7 skipped
 ```
 
-Linux 容器全量测试包含真实 IPv6 集成测试，当前为 **703 passed**。
+Linux 容器全量测试包含真实 IPv6 集成测试，当前为 **722 passed**。
 
 跑一次实验（一条命令，零参数即用 `config/stage1_config.json` 跑 B0）：
 
@@ -172,6 +174,10 @@ make stage2-baselines        # Stage 2 六行 × 30 seeds（RouterShim，非外�
 make analyze-stage2          # Stage 2 逐 seed 分布与基线配对比较
 make ablation-fixture        # A1/A2/A3 工程预检（fixture，不是模型结果）
 make analyze-ablation        # A1/A2/A3 同 seed 配对与 provenance 标记
+make p1-power                # P1 预注册功效敏感度
+make p1-fixture              # 四场景 A1/A2/A3/B5-open/B5-closed 工程矩阵
+make analyze-p1              # P1 开放动作空间矩阵分析
+make p1-audit                # 构造、API 与 epoch 观测审计包
 make 6sense-compat           # T7：Linux 容器中的 aliasv6 + scanv6 去别名化验收
 ```
 

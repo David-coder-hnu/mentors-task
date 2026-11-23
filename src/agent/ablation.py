@@ -17,6 +17,7 @@ from typing import Any
 
 from ..adapter.types import Response
 from .decide import Action, DecisionError, Stage1State
+from .primitive import parse_steps
 from .prompts.ablated import render_ablated
 
 
@@ -154,6 +155,24 @@ class OpaqueEncoding:
                 count=count,
                 name=name,
                 blueprint=blueprint,
+            )
+        if kind == "compose":
+            name = payload.get("name")
+            count = payload.get("count")
+            if not isinstance(name, str) or not name:
+                raise AblationError("compose name 必须是非空字符串")
+            if not isinstance(count, int) or isinstance(count, bool) or count <= 0:
+                raise AblationError("compose count 必须是正整数")
+            try:
+                steps = parse_steps(payload.get("steps"))
+            except Exception as exc:
+                raise AblationError(str(exc)) from exc
+            return Action(
+                kind="compose",
+                reason=reason,
+                count=count,
+                name=name,
+                steps=steps,
             )
         region = payload.get("region")
         if not isinstance(region, str):
