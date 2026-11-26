@@ -32,6 +32,7 @@ PDF 与转写均已从当前树和全部 Git 历史中移除，只保留在仓�
 | `t7-6sense-compat-2026-11-10.md` | 本机 arm64 兼容的 6Sense `aliasv6 + scanv6` 去别名化验收 |
 | `t16-engineering-2026-11-10.md` | A1/A2/A3 同 seed 配对工程闭环、30-seed fixture 预检与正式开跑条件 |
 | `p1-engineering-2026-11-23.md` | A2 运行期组合程序、B5-open、四场景和 P1 审计包 |
+| `p1-real-broad-2026-11-23.md` | P1 `broad` 的真实模型 A1/A2/A3 矩阵、B5 对照、配对检验与证据边界 |
 
 结果文件只陈述对应 config、seed 和靶场下实际测到的内容，不把 Stage 1 结果外推到
 P1、Stage 2 或真实互联网。
