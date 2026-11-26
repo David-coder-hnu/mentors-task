@@ -22,3 +22,11 @@ queue_log_*.txt
 # 的东西——一轮 20000 探测就是 3 MB 的文本，进版本库只会把仓库撑肿，
 # 而它提供的证据已经落到 docs/perf_baseline.md 的表里了。
 docker/run/
+
+# 公开仓库不包含第三方论文全文、翻译或导师调研报告原件。
+# 这些材料只保留在仓库之外的私有离线备份中。
+docs/restricted/
+docs/reports/IPv6_Agent_Probing_Research_Report.md
+docs/reports/IPv6_Agent_Probing_Research_Report.pdf
+/IPv6_Agent_Probing_Research_Report.md
+/IPv6_Agent_Probing_Research_Report.pdf
